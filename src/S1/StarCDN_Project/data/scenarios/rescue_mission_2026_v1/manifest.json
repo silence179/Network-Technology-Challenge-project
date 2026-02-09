@@ -1,0 +1,18 @@
+{
+  "scenario_name": "rescue_mission_2026_v1",
+  "t0_utc": "2026-01-27 12:00:00",
+  "sim_duration_sec": 600,
+  "sat_count": 50,
+  "trace_files": [
+    "sat_trace_0_59999.csv",
+    "sat_trace_60000_119999.csv",
+    "sat_trace_120000_179999.csv",
+    "sat_trace_180000_239999.csv",
+    "sat_trace_240000_299999.csv",
+    "sat_trace_300000_359999.csv",
+    "sat_trace_360000_419999.csv",
+    "sat_trace_420000_479999.csv",
+    "sat_trace_480000_539999.csv",
+    "sat_trace_540000_599999.csv"
+  ]
+}
