@@ -4,11 +4,12 @@ from skyfield.nutationlib import iau2000b
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
+import requests
 import os
 
 # ======================== 全局配置（需与S2协商确认）========================
 # 1. 时间配置（T0时刻：仿真起始时间，与S2保持一致）
-T0_UTC = datetime(2026, 1, 27, 12, 0, 0)  # 示例：2026-01-27 12:00:00 UTC
+T0_UTC = datetime(2026, 3, 5, 8, 0, 0)  # 示例：2026-03-05 8:00:00 UTC
 SIM_DURATION_SEC = 600  # 仿真总时长（10分钟）
 TIME_STEP_SEC = 1  # 时间步长（1秒/帧）
 MS_PER_SEC = 1000  # 毫秒转换系数
@@ -16,20 +17,67 @@ MS_PER_SEC = 1000  # 毫秒转换系数
 # 2. 救援区域配置（观察点：与S2选定的救援中心一致）
 OBS_LAT = 30.0  # 救援中心纬度（示例：四川某地）
 OBS_LON = 104.0  # 救援中心经度
-OBS_ELE = 500.0  # 救援中心海拔（米）
+OBS_ELE = 459.0  # 救援中心海拔（米）
 
 # 3. 卫星筛选配置
 MIN_ALT_DEG = 0  # 最小仰角（地平线以上）
 MAX_DIST_KM = 2000  # 最大距离（2000km）
-MAX_SAT_COUNT = 50  # 最终输出卫星数量
+MAX_SAT_COUNT = 10  # 最终输出卫星数量
 IP_PREFIX = "10.0.3."  # 卫星IP前缀
 
 # 4. 文件配置
-TLE_FILE = "Starlinks.tle"  # 本地TLE文件路径
-OUTPUT_DIR = "./StarCDN_Project/data/scenarios/rescue_mission_2026_v1/traces"  # 输出目录
+# 获取当前代码文件的绝对路径（不受运行目录影响）
+CODE_FILE_PATH = os.path.abspath(__file__)
+# 获取代码文件所在的目录（路径基准）
+CODE_DIR = os.path.dirname(CODE_FILE_PATH)
+CELESTRAK_STARLINK_TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle" # 星链TLE数据源
+TLE_FILE = os.path.join(CODE_DIR, "starlink.tle") # 本地TLE文件路径
+OUTPUT_DIR = os.path.join(
+    CODE_DIR,
+    "StarCDN_Project",
+    "data",
+    "traces"
+)  # 输出目录
 CHUNK_DURATION_SEC = 60  # 每个文件的时间切片（60秒）
 
+# 5. 动态筛选配置
+DYNAMIC_FILTER_INTERVAL_SEC = 60  # 动态筛选时间窗口（每60秒重新筛选一次）
+RESELECT_SAT_COUNT = 10  # 每次动态筛选保留的卫星数
+
 # ======================== 工具函数 ========================
+'''
+def download_latest_tle():
+    """
+    从CelesTrak下载最新的Starlink TLE数据，并保存到本地starlink.tle文件
+    """
+    try:
+        # 发送请求获取TLE数据（添加超时和用户代理，避免请求被拦截）
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(CELESTRAK_STARLINK_TLE_URL, headers=headers, timeout=30)
+        # 检查请求是否成功
+        response.raise_for_status()
+        
+        # 将获取的TLE数据写入本地文件（覆盖原有内容）
+        with open(TLE_FILE, "w", encoding="utf-8") as f:
+            f.write(response.text)
+        
+        print(f"✅ 成功下载最新Starlink TLE数据，已更新 {TLE_FILE}")
+        return True
+    
+    except requests.exceptions.RequestException as e:
+        # 网络请求失败时的异常处理
+        print(f"❌ 下载TLE数据失败：{e}")
+        # 如果本地已有旧的TLE文件，提示并使用旧文件
+        if os.path.exists(TLE_FILE):
+            print(f"⚠️ 将使用本地已有的 {TLE_FILE} 文件继续运行")
+            return True
+        else:
+            print(f"❌ 本地无TLE文件且下载失败，程序无法继续")
+            return False
+'''
+
 def init_time_scale():
     """初始化Skyfield时间标尺并返回T0时刻对象"""
     ts = load.timescale()
@@ -39,7 +87,45 @@ def init_time_scale():
     )
     return ts, t0
 
-def load_and_filter_satellites(t0, observer):
+def filter_visible_satellites(all_starlink_sats, observer, current_t):
+    """
+    单时间点筛选可见卫星
+    筛选逻辑：当前时刻仰角>MIN_ALT_DEG 或 距离<MAX_DIST_KM
+    """
+    visible_sats = []
+    for sat in all_starlink_sats:
+        diff = sat - observer
+        topo = diff.at(current_t)
+        alt_deg = topo.altaz()[0].degrees
+        dist_km = topo.distance().km
+
+        if alt_deg > MIN_ALT_DEG or dist_km < MAX_DIST_KM:
+            visible_sats.append((dist_km, sat))
+
+    # 按距离排序取前N颗
+    visible_sats_sorted = sorted(visible_sats, key=lambda x: x[0])
+    selected_sats = visible_sats_sorted[:RESELECT_SAT_COUNT]
+    
+    # 生成动态元数据（保证node_id/IP相对稳定，优先复用已有ID）
+    sat_metadata = []
+    for idx, (dist_km, sat) in enumerate(selected_sats, 1):
+        # 提取卫星唯一标识（NORAD编号），避免重复命名
+        norad_id = sat.model.satnum
+        sat_id = f"SAT_{norad_id:05d}"  # 用NORAD编号替代顺序号，保证唯一性
+        ip = f"{IP_PREFIX}{norad_id % 255}"  # 基于NORAD编号生成IP，避免冲突
+        
+        sat_metadata.append({
+            "node_id": sat_id,
+            "name": sat.name.strip(),
+            "ip": ip,
+            "orbit_id": -1,
+            "satellite_obj": sat,
+            "norad_id": norad_id,  # 新增NORAD编号，便于追踪
+            "current_dist_km": round(dist_km, 2)
+        })
+    return sat_metadata
+
+def load_and_filter_satellites(t0, observer): #旧的筛选逻辑，静态筛选
     """
     加载TLE数据并筛选符合条件的卫星
     筛选逻辑：T0时刻仰角>0° 或 距离<2000km，按距离排序取前MAX_SAT_COUNT颗
@@ -81,7 +167,60 @@ def load_and_filter_satellites(t0, observer):
         })
     return sat_metadata
 
-def calculate_sat_trajectory(sat_metadata, ts, t0):
+def calculate_dynamic_sat_trajectory(all_starlink_sats, ts, t0, observer):
+    """
+    动态计算卫星轨迹：每DYNAMIC_FILTER_INTERVAL_SEC秒重新筛选可见卫星
+    """
+    all_traces = []
+    total_steps = SIM_DURATION_SEC // TIME_STEP_SEC
+
+    # 预加载所有Starlink卫星（避免重复加载TLE）
+    print(f"📡 预加载 {len(all_starlink_sats)} 颗Starlink卫星，开始动态轨迹计算...")
+
+    for step in range(total_steps):
+        current_sec = step * TIME_STEP_SEC
+        current_time_ms = current_sec * MS_PER_SEC
+        current_t = t0 + timedelta(seconds=current_sec)
+
+        # 每N秒重新筛选一次可见卫星
+        if current_sec % DYNAMIC_FILTER_INTERVAL_SEC == 0:
+            current_sat_metadata = filter_visible_satellites(all_starlink_sats, observer, current_t)
+            print(f"⏱️  时间 {current_sec}秒：筛选出 {len(current_sat_metadata)} 颗可见卫星")
+
+        # 计算当前可见卫星的轨迹
+        for sat_info in current_sat_metadata:
+            sat = sat_info["satellite_obj"]
+            geocentric = sat.at(current_t)
+            ecef_xyz_m = geocentric.frame_xyz(itrs).m
+            ecef_x, ecef_y, ecef_z = ecef_xyz_m
+
+            subpoint = wgs84.subpoint(geocentric)
+            altitude_km = subpoint.elevation.km
+
+            trace = {
+                "time_ms": current_time_ms,
+                "node_id": sat_info["node_id"],
+                "name": sat_info["name"],
+                "type": "SAT",
+                "ecef_x": round(ecef_x, 2),
+                "ecef_y": round(ecef_y, 2),
+                "ecef_z": round(ecef_z, 2),
+                "altitude_km": round(altitude_km, 2),
+                "orbit_id": sat_info["orbit_id"],
+                "ip": sat_info["ip"],
+                "norad_id": sat_info["norad_id"],  # 新增字段：卫星唯一标识
+                "distance_km": sat_info["current_dist_km"]  # 新增字段：当前距离
+            }
+            all_traces.append(trace)
+
+        # 进度提示（每小时输出一次）
+        if current_sec % 3600 == 0 and current_sec > 0:
+            print(f"🚀 已完成 {current_sec/3600} 小时轨迹计算，累计 {len(all_traces)} 条记录")
+
+    print(f"📊 完成 {total_steps} 个时间步的轨迹计算，共 {len(all_traces)} 条记录")
+    return pd.DataFrame(all_traces)
+
+def calculate_sat_trajectory(sat_metadata, ts, t0): #旧的轨迹计算
     """
     计算卫星轨迹：生成每个时间步的ECEF坐标（米）和高度（千米）
     """
@@ -222,6 +361,13 @@ def validate_trajectory_data(df):
 
 # ======================== 主流程 ========================
 if __name__ == "__main__":
+
+    '''
+    if not download_latest_tle():
+    # 下载失败且无本地文件时，终止程序
+        exit(1)
+    '''
+
     try:
         print("="*60)
         print("🚀 卫星轨迹生成程序（S1任务）启动")
@@ -238,6 +384,15 @@ if __name__ == "__main__":
             elevation_m=OBS_ELE
         )
 
+        satellites = load.tle_file(TLE_FILE)
+        all_starlink_sats = [sat for sat in satellites if "STARLINK" in sat.name.upper()]
+        print(f"📡 预加载 {len(all_starlink_sats)} 颗Starlink卫星")
+
+        trajectory_df = calculate_dynamic_sat_trajectory(all_starlink_sats, ts, t0, observer)
+        validate_trajectory_data(trajectory_df)
+        split_and_save_csv(trajectory_df)
+
+        '''
         # 2. 筛选卫星并生成元数据
         sat_metadata = load_and_filter_satellites(t0, observer)
 
@@ -249,6 +404,7 @@ if __name__ == "__main__":
 
         # 5. 切片保存文件
         split_and_save_csv(trajectory_df)
+        '''
 
         print("\n" + "="*60)
         print("🎉 卫星轨迹生成完成！")
