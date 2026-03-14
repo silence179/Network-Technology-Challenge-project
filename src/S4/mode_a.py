@@ -55,7 +55,7 @@ class Engine:
                 intf_name2 = intf_name
                 
         # 处理链路可能不存在的问题
-        links = self.net.linksBetween(n1, n2)
+        links = self.net.linksBetween(self.net.get(n1), self.net.get(n2))
         LogColor.info(f'links between {n1} and {n2} : {links}')
         if not links:
             lk = self.net.addLink(
@@ -81,10 +81,10 @@ class Engine:
             lk = links[0]
             for intf in (lk.intf1, lk.intf2):
                 intf.config(
-                    bw=link['bw_mbps'],
-                    delay=link['delay_ms'],
-                    jitter=link['jitter_ms'],
-                    loss=link['loss_pct']
+                    bw=int(link['bw_mbps']),
+                    delay=float(link['delay_ms']),
+                    jitter=float(link['jitter_ms']),
+                    loss=int(float(link['loss_pct']))
                 )
             if link['direction'] == 'UNIDIR':
                 dst_intf = lk.intf2.name

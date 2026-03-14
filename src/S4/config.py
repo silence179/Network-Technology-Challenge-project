@@ -1,7 +1,7 @@
-MODE = "soft" # 模式选择，“soft”为mode b，其他是mode a, mode a为开发半成品，不推荐使用
+MODE = "hard" # 模式选择，“soft”为mode b，其他是mode a, mode a为开发半成品，不推荐使用
 
-csv_dir = "../S3/output/links" # csv文件夹路径，存储网络拓扑信息
-rules_dir = "../S3/output/rules" # json文件夹路径，存储路由规则
+csv_dir = "test_data" # csv文件夹路径，存储网络拓扑信息
+rules_dir = "test_data" # json文件夹路径，存储路由规则
 
 from enum import Enum
 class action(Enum):
