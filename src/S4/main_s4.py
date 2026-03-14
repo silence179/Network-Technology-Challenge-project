@@ -43,11 +43,12 @@ def ReadRules(json_path):
             rule['action'] = tmp_action
         return data['meta'], data['rules']
 
-def GetAllFiles(relative_path):
+def GetAllFiles(relative_path, format='.invalid$'):
     """
-    返回指定文件夹下的所有csv和json文件的绝对路径，按文件名中最后一个下划线后的数字排序
+    返回指定文件夹下以format结尾的的绝对路径，按文件名中最后一个下划线后的数字排序
 
     :param relative_path: 文件夹的相对路径
+    :param format: 文件格式，默认为'.invalid$'，即不匹配任何文件    
     """
     # 获取绝对路径
     absolute_path = os.path.abspath(relative_path)
@@ -66,10 +67,10 @@ def GetAllFiles(relative_path):
     # 遍历文件夹中的文件
     for root, dirs, files in os.walk(absolute_path):
         for file in files:
-            if file.endswith('.csv') or file.endswith('.json'):
+            if file.endswith(format):
                 resp.append(os.path.join(root, file))
             else:
-                LogColor.warning(f"文件 {file} 不是csv或json文件，已跳过")
+                LogColor.warning(f"文件 {file} 不是以{format}结尾的文件，已跳过")
 
     # 按文件名中最后一个下划线后的数字排序
     def extract_number(file_path):
@@ -85,7 +86,7 @@ def GetAllFiles(relative_path):
 def run():
     engine = Engine()
     timer = 0
-    for csv_file, rules_file in zip(GetAllFiles(csv_dir), GetAllFiles(rules_dir)):
+    for csv_file, rules_file in zip(GetAllFiles(csv_dir, '.csv'), GetAllFiles(rules_dir, '.json')):
         LogColor.info(f"csv file: {csv_file}\nrules file: {rules_file}\n")
         links = ReadLinks(csv_file)
         meta, rules = ReadRules(rules_file)
