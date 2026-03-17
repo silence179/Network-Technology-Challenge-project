@@ -86,6 +86,7 @@ def GetAllFiles(relative_path, format='.invalid$'):
 def run():
     engine = Engine()
     timer = 0
+    preloaded = False
     for csv_file, rules_file in zip(GetAllFiles(csv_dir, '.csv'), GetAllFiles(rules_dir, '.json')):
         LogColor.info(f"csv file: {csv_file}\nrules file: {rules_file}\n")
         links = ReadLinks(csv_file)
@@ -97,6 +98,17 @@ def run():
         edge_ind = 0
         reqs = [
         ]
+
+        # 预加载链路
+        if not preloaded:
+            preloaded = True
+            LogColor.info('preloading links...')
+            for i in range(320):
+                if i < len(links):
+                    engine.addLink(links[i])
+                else:
+                    break
+            LogColor.info('preloading complete')
 
         try:
             while tmp_timer < 60000:

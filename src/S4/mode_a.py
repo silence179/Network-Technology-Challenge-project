@@ -63,10 +63,10 @@ class Engine:
                 cls=TCLink,
                 intfName1=intf_name1,
                 intfName2=intf_name2,
-                bw=int(link['bw_mbps']),
-                delay=float(link['delay_ms']),
-                jitter=float(link['jitter_ms']),
-                loss=int(float(link['loss_pct'])),
+                bw=int(link['bw_mbps']) if 'bw_mbps' in link.keys() else None,
+                delay=float(link['delay_ms']) if 'delay_ms' in link.keys() else None,
+                jitter=float(link['jitter_ms']) if 'jitter_ms' in link.keys() else None,
+                loss=int(float(link['loss_pct'])) if 'loss_pct' in link.keys() else None,
                 use_htb=True
             )
             # 启用接口
