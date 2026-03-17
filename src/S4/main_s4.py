@@ -5,6 +5,7 @@ import os
 import csv
 import time
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 
 if cf.MODE == "soft":
@@ -87,50 +88,58 @@ def run():
     engine = Engine()
     timer = 0
     preloaded = False
-    for csv_file, rules_file in zip(GetAllFiles(csv_dir, '.csv'), GetAllFiles(rules_dir, '.json')):
-        LogColor.info(f"csv file: {csv_file}\nrules file: {rules_file}\n")
-        links = ReadLinks(csv_file)
-        meta, rules = ReadRules(rules_file)
-        engine.AddContent('UAV_01', 'test.jpg', filesize=50)
-        tmp_timer = 0
-        rule_ind = 0
-        req_ind = 0
-        edge_ind = 0
-        reqs = [
-        ]
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for csv_file, rules_file in zip(GetAllFiles(csv_dir, '.csv'), GetAllFiles(rules_dir, '.json')):
+            LogColor.info(f"csv file: {csv_file}\nrules file: {rules_file}\n")
+            links = ReadLinks(csv_file)
+            meta, rules = ReadRules(rules_file)
+            engine.AddContent('UAV_01', 'test.jpg', filesize=50)
+            tmp_timer = 0
+            rule_ind = 0
+            req_ind = 0
+            edge_ind = 0
+            reqs = [
+            ]
 
-        # 预加载链路
-        if not preloaded:
-            preloaded = True
-            LogColor.info('preloading links...')
-            for i in range(320):
-                if i < len(links):
-                    engine.addLink(links[i])
-                else:
-                    break
-            LogColor.info('preloading complete')
+            # 预加载链路
+            if not preloaded:
+                preloaded = True
+                LogColor.info('preloading links...')
+                for i in range(320):
+                    if i < len(links):
+                        engine.addLink(links[i])
+                    else:
+                        break
+                LogColor.info('preloading complete')
 
-        try:
-            while tmp_timer < 60000:
-                LogColor.info(f'time : {timer}')
-                while edge_ind < len(links) and int(links[edge_ind]['time_ms']) <= timer:
-                    engine.addLink(links[edge_ind])
-                    LogColor.debug(f'edge {edge_ind} applied')
-                    edge_ind += 1
+            try:
+                while tmp_timer < 60000:
+                    LogColor.info(f'time : {timer}')
 
-                while rule_ind < len(rules) and rules[rule_ind]['time_ms'] <= timer:
-                    engine.UpdateRule(rules[rule_ind], meta)
-                    LogColor.debug(f'rule {rule_ind} applied')
-                    rule_ind += 1
-                while req_ind < len(reqs) and reqs[req_ind]['time']  <= timer:
-                    req = reqs[req_ind]
-                    engine.ExecuteReq(req['node_id'], req['content_id'], timer, 'output/networks.csv')
-                    req_ind += 1
-                timer += 100
-                tmp_timer += 100
-                time.sleep(0.1)
-        except KeyboardInterrupt:
-            return
+                    # 使用线程池并行更新链路
+                    futures = []
+                    while edge_ind < len(links) and int(links[edge_ind]['time_ms']) <= timer:
+                        futures.append(executor.submit(engine.addLink, links[edge_ind]))
+                        LogColor.info(f'edge {edge_ind} scheduled for update')
+                        edge_ind += 1
+
+                    # 等待所有任务完成
+                    for future in futures:
+                        future.result()
+
+                    while rule_ind < len(rules) and rules[rule_ind]['time_ms'] <= timer:
+                        engine.UpdateRule(rules[rule_ind], meta)
+                        LogColor.debug(f'rule {rule_ind} applied')
+                        rule_ind += 1
+                    while req_ind < len(reqs) and reqs[req_ind]['time']  <= timer:
+                        req = reqs[req_ind]
+                        engine.ExecuteReq(req['node_id'], req['content_id'], timer, 'output/networks.csv')
+                        req_ind += 1
+                    timer += 100
+                    tmp_timer += 100
+                    time.sleep(0.1)
+            except KeyboardInterrupt:
+                return
 
 if __name__ == '__main__':
     run()
