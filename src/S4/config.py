@@ -2,7 +2,7 @@ MODE = "hard" # 模式选择，“soft”为mode b，其他是mode a, mode a为�
 
 csv_dir = "test_data" # csv文件夹路径，存储网络拓扑信息
 rules_dir = "test_data" # json文件夹路径，存储路由规则
-
+max_workers = 8 # 最大线程数
 from enum import Enum
 class action(Enum):
     NOP = 1

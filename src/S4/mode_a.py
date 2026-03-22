@@ -1,6 +1,7 @@
 import csv
 import networkx as nx
 import os
+import time
 from mininet.net import Mininet
 from mininet.node import OVSSwitch
 from mininet.link import TCLink
@@ -56,7 +57,6 @@ class Engine:
                 
         # 处理链路可能不存在的问题
         links = self.net.linksBetween(self.net.get(n1), self.net.get(n2))
-        LogColor.info(f'links between {n1} and {n2} : {links}')
         if not links:
             lk = self.net.addLink(
                 n1, n2,
@@ -80,6 +80,12 @@ class Engine:
         else:
             lk = links[0]
             for intf in (lk.intf1, lk.intf2):
+                # 检查接口是否空闲
+                # while intf.node.waiting:
+                #     LogColor.debug(f"Interface {intf.name} is busy, waiting...")
+                #     time.sleep(0.01)
+
+                # 配置接口
                 intf.config(
                     bw=int(link['bw_mbps']),
                     delay=float(link['delay_ms']),

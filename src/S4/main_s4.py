@@ -1,6 +1,4 @@
-import config as cf
-from config import action, LogColor
-from config import csv_dir, rules_dir
+from config import *
 import os
 import csv
 import time
@@ -8,7 +6,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 
 
-if cf.MODE == "soft":
+if MODE == "soft":
     from mode_b import Engine
     LogColor.info("mode b imported")
 else:
@@ -88,7 +86,7 @@ def run():
     engine = Engine()
     timer = 0
     preloaded = False
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for csv_file, rules_file in zip(GetAllFiles(csv_dir, '.csv'), GetAllFiles(rules_dir, '.json')):
             LogColor.info(f"csv file: {csv_file}\nrules file: {rules_file}\n")
             links = ReadLinks(csv_file)
@@ -116,16 +114,43 @@ def run():
                 while tmp_timer < 60000:
                     LogColor.info(f'time : {timer}')
 
-                    # 使用线程池并行更新链路
-                    futures = []
+                    # Collect all links for the current timer
+                    current_links = []
                     while edge_ind < len(links) and int(links[edge_ind]['time_ms']) <= timer:
-                        futures.append(executor.submit(engine.addLink, links[edge_ind]))
-                        LogColor.info(f'edge {edge_ind} scheduled for update')
+                        current_links.append(links[edge_ind])
                         edge_ind += 1
 
-                    # 等待所有任务完成
-                    for future in futures:
-                        future.result()
+                    # Process links in batches
+                    while current_links:
+                        batch = []
+                        used_nodes = set()
+
+                        # Select up to 8 links with unique nodes
+                        for link in current_links[:]:
+                            src, dst = link['src'], link['dst']
+
+                            if src not in used_nodes and dst not in used_nodes:
+                                batch.append(link)
+                                used_nodes.add(src)
+                                used_nodes.add(dst)
+                                current_links.remove(link)  # Remove selected link from the set
+
+                            if len(batch) == max_workers:
+                                break
+
+                        # If no more unique links can be selected, process the remaining one by one
+                        if not batch and current_links:
+                            batch.append(current_links.pop(0))
+
+                        # Submit the batch to the thread pool
+                        futures = []
+                        for link in batch:
+                            futures.append(executor.submit(engine.addLink, link))
+
+                        # Wait for the batch to complete
+                        for future in futures:
+                            future.result()
+                        # LogColor.info(f'{len(batch)} edges updated')
 
                     while rule_ind < len(rules) and rules[rule_ind]['time_ms'] <= timer:
                         engine.UpdateRule(rules[rule_ind], meta)
