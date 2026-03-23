@@ -108,7 +108,8 @@ def calculate_delay(dist_m): return (dist_m / SPEED_OF_LIGHT) * 1000
 def calculate_jitter(delay_ms): return delay_ms * 0.1
 def calculate_bandwidth(type_a, type_b):
     types = {type_a, type_b}
-    if 'GS' in types and 'UAV' in types: return 54
+    if 'GS' in types and 'UAV' in types: 
+        return 0  # 地面站和无人机之间距离太长，必须通过卫星中继
     if 'UAV' in types and 'SAT' in types: return 20
     if 'SAT' in types and 'GS' in types: return 20
     if 'SAT' in types: return 100
@@ -170,6 +171,8 @@ def compute_topology(nodes_df, time_ms):
             dist_m = dists[i][j_idx]
             delay = calculate_delay(dist_m)
             bw = calculate_bandwidth(type_a, type_b)
+            
+            if bw == 0: continue  # 跳过带宽为 0 的链接
             
             # ★★★ 注入断连逻辑 ★★★
             status = 'UP'
@@ -315,10 +318,6 @@ def generate_routing_rules(active_links, time_ms, node_ip_map, active_nodes):
             except: pass
 
     return rules
-
-# ---------------------------------------------------------
-# 主流程 (修改点 2: 注入 Down 链路)
-# ---------------------------------------------------------
 def main():
     output_link_dir = 'output/links'
     output_rule_dir = 'output/rules'
