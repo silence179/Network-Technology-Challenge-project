@@ -61,26 +61,56 @@ class Engine:
                 ip_addr = row['ip'].strip()
                 self.ip[node_id] = ip_addr
 
+    # def UpdateRule(self, rule, meta):
+    #     self.version = meta['version']
+    #     # self.src_script = meta['generated_by']
+    #     # self.algo = meta['default_algo']
+    #     # self.create_time = meta['create_time']
+    #
+    #     if rule['action'] == action.REPLACE and rule['node'] not in self.rules.keys():
+    #         rule['action'] = action.ADD
+    #     if rule['action'] == action.ADD:
+    #         if rule['node'] in self.rules.keys():
+    #             raise RuntimeError('invaild rule : add existed rule')
+    #         self.rules[rule['node']] = {k: v for k, v in rule.items() if k != "node"}
+    #     elif rule['action'] == action.REPLACE:
+    #         cur_node = rule['node']
+    #         for k, v in self.rules[cur_node].items():
+    #             self.rules[cur_node][k] = rule[k]
+    #     elif rule['action'] == action.DEL:
+    #         if rule['node'] in self.rules.keys():
+    #             self.rules.pop(rule['node'])
+
     def UpdateRule(self, rule, meta):
         self.version = meta['version']
-        # self.src_script = meta['generated_by']
-        # self.algo = meta['default_algo']
-        # self.create_time = meta['create_time']
 
-        if rule['action'] == action.REPLACE and rule['node'] not in self.rules.keys():
-            rule['action'] = action.ADD
-        if rule['action'] == action.ADD:
-            if rule['node'] in self.rules.keys():
-                raise RuntimeError('invaild rule : add existed rule')
-            self.rules[rule['node']] = {k: v for k, v in rule.items() if k != "node"}
-        elif rule['action'] == action.REPLACE:
-            cur_node = rule['node']
-            for k, v in self.rules[cur_node].items():
-                self.rules[cur_node][k] = rule[k]
-        elif rule['action'] == action.DEL:
-            if rule['node'] in self.rules.keys():
-                self.rules.pop(rule['node'])
-        
+        node = rule['node']
+        rule_data = {k: v for k, v in rule.items() if k != "node"}
+        action_type = rule['action']
+
+        # 1. 初始化节点的路由表为一个列表
+        if node not in self.rules:
+            self.rules[node] = []
+
+        # 2. 处理 ADD 动作：直接追加
+        if action_type == action.ADD:
+            self.rules[node].append(rule_data)
+            
+        # 3. 处理 REPLACE 动作：按目标网段查找，有则替换，无则追加
+        elif action_type == action.REPLACE:
+            found = False
+            for i, existing_rule in enumerate(self.rules[node]):
+                if existing_rule.get('dst_cidr') == rule.get('dst_cidr'):
+                    self.rules[node][i] = rule_data
+                    found = True
+                    break
+            if not found:
+                self.rules[node].append(rule_data)
+                
+        # 4. 处理 DEL 动作：剔除目标网段匹配的规则
+        elif action_type == action.DEL:
+            self.rules[node] = [r for r in self.rules[node] if r.get('dst_cidr') != rule.get('dst_cidr')] 
+
     def AddContent(self, target, filename, **fileinfo):
         if target in self.content.keys():
             self.content[target][filename] = fileinfo 
@@ -100,17 +130,37 @@ class Engine:
         return None
 
     # 单位分别为毫秒，mbps
+    # def compute_path_metrics(self, path, weight='delay_ms'):
+    #     total_delay = 0.0
+    #     min_bw = float('inf')
+    #
+    #     for u, v in zip(path[:-1], path[1:]):
+    #         key, data = min(
+    #             self.G[u][v].items(),
+    #             key=lambda item: item[1][weight]
+    #         )
+    #         total_delay += random.uniform(data['delay_ms'] - data['jitter_ms'], data['delay_ms'] + data['jitter_ms'])
+    #         min_bw = min(min_bw, data['bw_mbps'])
+    #
+    #     return total_delay, min_bw
+    # 单位分别为毫秒，mbps
     def compute_path_metrics(self, path, weight='delay_ms'):
         total_delay = 0.0
         min_bw = float('inf')
 
         for u, v in zip(path[:-1], path[1:]):
-            key, data = min(
-                self.G[u][v].items(),
-                key=lambda item: item[1][weight]
-            )
-            total_delay += random.uniform(data['delay_ms'] - data['jitter_ms'], data['delay_ms'] + data['jitter_ms'])
-            min_bw = min(min_bw, data['bw_mbps'])
+            # 1. 在 DiGraph 中直接获取两节点间唯一边的属性字典
+            data = self.G[u][v]
+            
+            # 2. 从 CSV 读入的数值都是字符串，必须先转换为 float 才能进行数学计算
+            delay_ms = float(data['delay_ms'])
+            # 使用 get 提供默认值 0.0，防止有些链路没配 jitter_ms 导致报错
+            jitter_ms = float(data.get('jitter_ms', 0.0)) 
+            bw_mbps = float(data['bw_mbps'])
+
+            # 3. 计算加入抖动后的延迟和路径瓶颈带宽
+            total_delay += random.uniform(delay_ms - jitter_ms, delay_ms + jitter_ms)
+            min_bw = min(min_bw, bw_mbps)
 
         return total_delay, min_bw
     def find_next_hop(self, current_node_id, target_ip):
@@ -181,7 +231,8 @@ class Engine:
             return
 
         # 提取算法名称 (从客户端的第一条路由规则中提取)
-        algo = self.rules[client].get('algo', 'Unknown')
+        # 这里暂时有问题 -----------------------------后续修改
+        algo = self.rules[client][0].get('algo', 'Unknown')
 
         # 3. 逐跳转发模拟路径 (Data Plane Simulation)
         path = [client]
@@ -263,91 +314,3 @@ class Engine:
 
             writer.writerow(row)
 
-
-    # def ExecuteReq(self, client, content_id, time, log_path):
-    #     target_node = None
-    #     for node, files in self.content.items():
-    #         if content_id in files:
-    #             target_node = node
-    #             break
-    #
-    #     if not target_node:
-    #         raise RuntimeError("Content not found in network")
-    #
-    #     # 2. 获取目标 IP
-    #     target_ip = self.ip.get(target_node)
-    #
-    #     # 3. 逐跳转发模拟路径
-    #     path = [client]
-    #     current_node = client
-    #     max_hops = 20 # 防止环路死循环
-    #
-    #     while current_node != target_node:
-    #         next_hop = self.find_next_hop(current_node, target_ip)
-    #
-    #         if not next_hop or next_hop not in self.G[current_node]:
-    #             LogColor.error(f"Routing fail at {current_node}: No path to {target_ip}")
-    #             return # 路由不可达
-    #
-    #         path.append(next_hop)
-    #         current_node = next_hop
-    #
-    #         if len(path) > max_hops:
-    #             LogColor.error("Routing loop detected!")
-    #             return
-    #
-    #     # 4. 计算这条真实路径的物理特性
-    #     total_delay, min_bw = self.compute_path_metrics(path)
-    #     if client not in self.rules.keys():
-    #         raise RuntimeError('invalid request: no such client')
-    #
-    #     # target = self.rules[client]['next_hop']
-    #     algo = self.rules[client]['algo']
-    #     cache_status = 'HIT'
-    #     http_code = 200
-    #
-    #     print(client,content_id)
-    #     # print(target)
-    #     print(self.content)
-    #
-    #     if (target in self.content.keys()) and (content_id in self.content[target].keys()):
-    #         def edge_cost(u, v, data):
-    #             if data['status'] != 'UP':
-    #                 return float('inf')
-    #             return data['delay_ms']
-    #
-    #         path = nx.shortest_path(
-    #             self.G,
-    #             source=client,
-    #             target=target,
-    #             weight=edge_cost
-    #         )
-    #
-    #         content_info = self.content[target][content_id]
-    #         file_size_MB = content_info['filesize']
-    #
-    #         total_delay, min_bw = self.compute_path_metrics(path)
-    #
-    #         download_time = file_size_MB * 8 / min_bw * 1000 + total_delay * 2
-    #
-    #         tmp = dict()
-    #         tmp['time_ms'] = time
-    #         tmp['req_id'] = self.req_id
-    #         self.req_id += 1
-    #         tmp['node_id'] = client
-    #         tmp['content_id'] = content_id
-    #         tmp['file_size_MB'] = file_size_MB
-    #         tmp['algo'] = algo
-    #         tmp['path'] = path
-    #         tmp['server_node'] = target
-    #         tmp['latency_ms'] = total_delay * 2
-    #         tmp['throughput_mbps'] = min_bw
-    #         tmp['http_code'] = http_code
-    #         tmp['cache_status'] = cache_status
-    #         tmp['download_time'] = download_time
-    #
-    #         self.WriteLog(tmp, log_path)
-    #     else:
-    #         raise RuntimeError('invalid request: no such content')
-    #
-    #
