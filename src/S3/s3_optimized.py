@@ -294,10 +294,11 @@ def generate_routing_rules(active_links, time_ms, node_ip_map, active_nodes, cac
                 path = nx.shortest_path(G_ctrl, ctrl_flow['src'], target_uav, weight='weight')
                 if len(path) > 1:
                     nh_id = path[1]
+                    target_ip = node_ip_map.get(target_uav, "0.0.0.0")
                     rules.append({
                         "time_ms": int(time_ms),
                         "node": ctrl_flow['src'],
-                        "dst_cidr": ctrl_flow['dst_cidr'],
+                        "dst_cidr": f"{target_ip}/32",
                         "action": "replace",
                         "next_hop": nh_id,
                         "next_hop_ip": node_ip_map.get(nh_id, "0.0.0.0"),
@@ -324,11 +325,12 @@ def generate_routing_rules(active_links, time_ms, node_ip_map, active_nodes, cac
                 if len(path) > 1:
                     nh_id = path[1]
                     current_bw = get_current_bandwidth(flow_config, time_ms)
+                    target_ip = node_ip_map.get(target_gs, "0.0.0.0")
                     
                     rules.append({
                         "time_ms": int(time_ms),
                         "node": src_uav,
-                        "dst_cidr": flow_config['dst_cidr'], 
+                        "dst_cidr": f"{target_ip}/32", 
                         "action": "replace",
                         "next_hop": nh_id,
                         "next_hop_ip": node_ip_map.get(nh_id, "0.0.0.0"),
@@ -397,17 +399,15 @@ def main():
                 )
                 topo_cache.cache_topology(links, cached_graphs)
                 print(f"   [Topology Updated] Step {i} (Time {t_val}ms)")
+            else:
+                # 即使拓扑没变，也需要更新缓存的 links 以同步最新的距离和延迟
+                topo_cache.last_topology = links
             
             last_topology_computation = i
         else:
-            # 重用缓存的拓扑，必须深拷贝或创建新字典以避免覆盖历史记录中的 time_ms
-            links = []
-            if topo_cache.last_topology:
-                for l in topo_cache.last_topology:
-                    new_l = l.copy()
-                    new_l['time_ms'] = t_val
-                    links.append(new_l)
-            
+            # 重用缓存的拓扑，仅更新时间戳（生成新字典以防止修改原缓存和之前的结果）
+            links = [dict(l, time_ms=t_val) for l in topo_cache.last_topology] if topo_cache.last_topology else []
+        
         chunk_links.extend(links)
         
         active_links = [l for l in links if l['status'] == 'UP']
