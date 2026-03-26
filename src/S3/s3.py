@@ -265,26 +265,27 @@ def generate_routing_rules(active_links, time_ms, node_ip_map, active_nodes):
         # 为高优控制流构建专门的图 (强调寿命)
         G_ctrl = build_graph_for_flow(active_links, ctrl_flow['priority'])
         
-        # 寻找去往 UAV 们的路径（取第一个 UAV 作为代表）
+# 寻找去往 UAV 们的路径
         target_uavs = [n for n in active_nodes if n.startswith('UAV_')]
-        if target_uavs:
-            target_uav = target_uavs[0]  # 取第一个 UAV
+        for target_uav in target_uavs:
             try:
                 # 寻找最短路 (这里 weight 是倾向于长寿命的)
                 path = nx.shortest_path(G_ctrl, ctrl_flow['src'], target_uav, weight='weight')
                 if len(path) > 1:
-                    nh_id = path[1]
-                    rules.append({
-                        "time_ms": int(time_ms),
-                        "node": ctrl_flow['src'],
-                        "dst_cidr": ctrl_flow['dst_cidr'], # 指令网段
-                        "action": "replace",
-                        "next_hop": nh_id,
-                        "next_hop_ip": node_ip_map.get(nh_id, "0.0.0.0"),
-                        "algo": "Stability-First",
-                        "req_bw_mbps": get_current_bandwidth(ctrl_flow, time_ms), # ★ 记录当前带宽需求
-                        "debug_info": f"Ctrl command to UAVs"
-                    })
+                    target_ip = node_ip_map.get(target_uav, "0.0.0.0")
+                    for i in range(len(path) - 1):
+                        nh_id = path[i+1]
+                        rules.append({
+                            "time_ms": int(time_ms),
+                            "node": path[i],
+                            "dst_cidr": f"{target_ip}/32", # 指令网段
+                            "action": "replace",
+                            "next_hop": nh_id,
+                            "next_hop_ip": node_ip_map.get(nh_id, "0.0.0.0"),
+                            "algo": "Stability-First",
+                            "req_bw_mbps": get_current_bandwidth(ctrl_flow, time_ms), # ★ 记录当前带宽需求
+                            "debug_info": f"Ctrl command to {target_uav}"
+                        })
             except: pass
 
     # --- 2. 处理各无人机的视频回传流 (UAV -> GS_01) ---
@@ -295,27 +296,29 @@ def generate_routing_rules(active_links, time_ms, node_ip_map, active_nodes):
         if flow_name.startswith("VIDEO_FLOW_"):
             src_uav = flow_config['src']
             if src_uav not in active_nodes: continue
-            
+
             # 为视频流构建图 (强调延迟与平衡)
             G_video = build_graph_for_flow(active_links, flow_config['priority'])
-            
+
             try:
                 path = nx.shortest_path(G_video, src_uav, target_gs, weight='weight')
                 if len(path) > 1:
-                    nh_id = path[1]
                     current_bw = get_current_bandwidth(flow_config, time_ms)
-                    
-                    rules.append({
-                        "time_ms": int(time_ms),
-                        "node": src_uav, # ★ 视频流是 UAV 主动发起的，规则下发给 UAV
-                        "dst_cidr": flow_config['dst_cidr'], 
-                        "action": "replace",
-                        "next_hop": nh_id,
-                        "next_hop_ip": node_ip_map.get(nh_id, "0.0.0.0"),
-                        "algo": "Latency-Balanced",
-                        "req_bw_mbps": current_bw, # ★ 告诉 S4 现在需要多大带宽
-                        "debug_info": f"[{current_bw} Mbps] Video streaming to {target_gs}"
-                    })
+                    target_ip = node_ip_map.get(target_gs, "0.0.0.0")
+
+                    for i in range(len(path) - 1):
+                        nh_id = path[i+1]
+                        rules.append({
+                            "time_ms": int(time_ms),
+                            "node": path[i], # 为经过的每一个节点建立转发规则
+                            "dst_cidr": f"{target_ip}/32",
+                            "action": "replace",
+                            "next_hop": nh_id,
+                            "next_hop_ip": node_ip_map.get(nh_id, "0.0.0.0"),
+                            "algo": "Latency-Balanced",
+                            "req_bw_mbps": current_bw, # ★ 告诉 S4 现在需要多大带宽
+                            "debug_info": f"[{current_bw} Mbps] Video streaming to {target_gs}"
+                        })
             except: pass
 
     return rules
