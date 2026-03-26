@@ -17,62 +17,127 @@ class action(Enum):
 
 import logging
 import os
-class LogColor:
-    """
-    根据不同的日志级别，打印不同颜色的日志，并将日志写入不同的文件
-    info：绿色
-    warning：黄色
-    error：红色
-    debug：灰色
-    """
-    # 确保日志文件夹存在
-    log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)
+from logging.handlers import RotatingFileHandler
 
-    # 定义不同日志级别的文件
-    info_log_file = os.path.join(log_dir, "info_runtime.log")
-    warning_log_file = os.path.join(log_dir, "warning_runtime.log")
-    error_log_file = os.path.join(log_dir, "error_runtime.log")
-    debug_log_file = os.path.join(log_dir, "debug_runtime.log")
-
-    # 配置不同的日志记录器
-    info_logger = logging.getLogger("info_logger")
-    warning_logger = logging.getLogger("warning_logger")
-    error_logger = logging.getLogger("error_logger")
-    debug_logger = logging.getLogger("debug_logger")
-
-    for logger, log_file in [
-        (info_logger, info_log_file),
-        (warning_logger, warning_log_file),
-        (error_logger, error_log_file),
-        (debug_logger, debug_log_file)
-    ]:
-        handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-        handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s: %(message)s'))
-        logger.addHandler(handler)
-        logger.setLevel(logging.DEBUG)
+# ========================
+# 全新 稳定版 日志模块
+# ========================
+class LogConfig:
+    logger = None  # 单例模式，全局唯一 logger
 
     @staticmethod
-    def info(message: str):
-        # info级别的日志，绿色
-        LogColor.info_logger.info(message)
-        print("\033[0;32m" + message + "\033[0m")
+    def get_logger():
+        # 已经初始化过，直接返回，避免重复创建
+        if LogConfig.logger is not None:
+            return LogConfig.logger
 
-    @staticmethod
-    def warning(message: str):
-        # warning级别的日志，黄色
-        LogColor.warning_logger.warning(message)
-        print("\033[0;33m" + message + "\033[0m")
+        # 1. 创建 logger 单例
+        logger = logging.getLogger("app_logger")
+        logger.setLevel(logging.DEBUG)  # 最低接收级别
+        logger.propagate = False  # 禁止向上传递，避免重复
 
-    @staticmethod
-    def error(message: str):
-        # error级别的日志，红色
-        formatted_message = "-" * 120 + '\n| ' + message + "\n" + "└" + "-" * 150
-        LogColor.error_logger.error(formatted_message)
-        print("\033[0;31m" + formatted_message + "\033[0m")
+        # 防止重复添加 handler
+        if logger.handlers:
+            logger.handlers.clear()
 
-    @staticmethod
-    def debug(message: str):
-        # debug级别的日志，灰色
-        LogColor.debug_logger.debug(message)
-        print("\033[0;37m" + message + "\033[0m")
+        # 2. 日志文件夹
+        log_dir = "logs"
+        os.makedirs(log_dir, exist_ok=True)
+
+        # ========================
+        # 格式定义
+        # ========================
+        file_formatter = logging.Formatter(
+            "%(asctime)s | %(levelname)-8s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        console_formatter = logging.Formatter(
+            "%(asctime)s | \033[%(color)sm%(levelname)-8s\033[0m | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+
+        # ========================
+        # Handler 1：控制台彩色输出
+        # ========================
+        class ColorConsoleHandler(logging.StreamHandler):
+            def format(self, record):
+                colors = {
+                    "DEBUG": "37",    # 灰色
+                    "INFO": "32",     # 绿色
+                    "WARNING": "33",  # 黄色
+                    "ERROR": "31",    # 红色
+                    "CRITICAL": "35"
+                }
+                record.color = colors.get(record.levelname, "37")
+                return super().format(record)
+
+        console_handler = ColorConsoleHandler()
+        console_handler.setLevel(logging.DEBUG)
+        console_handler.setFormatter(console_formatter)
+        logger.addHandler(console_handler)
+
+        # ========================
+        # Handler 2：INFO 级别文件（只存 INFO + 不包含 ERROR/WARNING）
+        # ========================
+        class InfoFilter(logging.Filter):
+            def filter(self, record):
+                return record.levelno == logging.INFO
+
+        info_handler = RotatingFileHandler(
+            os.path.join(log_dir, "info_runtime.log"),
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,
+            encoding="utf-8"
+        )
+        info_handler.setLevel(logging.INFO)
+        info_handler.addFilter(InfoFilter())
+        info_handler.setFormatter(file_formatter)
+        logger.addHandler(info_handler)
+
+        # ========================
+        # Handler 3：WARNING 文件
+        # ========================
+        warn_handler = RotatingFileHandler(
+            os.path.join(log_dir, "warning_runtime.log"),
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8"
+        )
+        warn_handler.setLevel(logging.WARNING)
+        warn_handler.setFormatter(file_formatter)
+        logger.addHandler(warn_handler)
+
+        # ========================
+        # Handler 4：ERROR 文件
+        # ========================
+        err_handler = RotatingFileHandler(
+            os.path.join(log_dir, "error_runtime.log"),
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8"
+        )
+        err_handler.setLevel(logging.ERROR)
+        err_handler.setFormatter(file_formatter)
+        logger.addHandler(err_handler)
+
+        # ========================
+        # Handler 5：DEBUG 文件
+        # ========================
+        debug_handler = RotatingFileHandler(
+            os.path.join(log_dir, "debug_runtime.log"),
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8"
+        )
+        debug_handler.setLevel(logging.DEBUG)
+        debug_handler.setFormatter(file_formatter)
+        logger.addHandler(debug_handler)
+
+        LogConfig.logger = logger
+        return logger
+
+
+# ========================
+# 全局日志对象（你原来怎么用，现在还怎么用）
+# ========================
+log = LogConfig.get_logger()
