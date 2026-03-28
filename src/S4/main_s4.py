@@ -99,10 +99,29 @@ def run():
     uav_list = ['UAV_01', 'UAV_02', 'UAV_03']
     main_gs = 'GS_01'
 
+    # ============ 添加所有内容到网络中 ============
+    
+    # 1. 在各 UAV 上添加遥测数据内容
     for uav in uav_list:
         engine.AddContent(target=uav, filename=f'telemetry_{uav}', filesize=0.1)
+    
+    # 2. 在 GS 上添加控制信号内容
+    for uav in uav_list:
+        engine.AddContent(target=main_gs, filename=f'gs_control_{uav}', filesize=0.001)  # 10kbps ~ 0.001MB per 100ms
+    
+    # 3. 在 UAV 上添加低清图像内容
+    # （流量驱动，无具体文件存储，filesize根据带宽和采样间隔计算）
+    # 10Mbps × 100ms = 0.125MB per sample
+    for uav in uav_list:
+        engine.AddContent(target=uav, filename=f'low_res_img_{uav}', filesize=0.125)
+    
+    # 4. 在 UAV 上添加高清图像内容
+    # 40Mbps × 100ms = 0.5MB per sample
+    for uav in uav_list:
+        engine.AddContent(target=uav, filename=f'hd_img_{uav}', filesize=0.5)
 
-    reqs = generate_sar_traffic(uav_list,main_gs)
+    # ============ 生成流量模式 ============
+    flows = generate_sar_traffic(uav_list, main_gs)
 
     
     for csv_file, rules_file in zip(GetAllFiles(csv_dir), GetAllFiles(rules_dir)):
@@ -129,10 +148,17 @@ def run():
                     engine.UpdateRule(rules[rule_ind], meta)
                     # LogColor.debug(f'rule {rule_ind} applied')
                     rule_ind += 1
-                while req_ind < len(reqs) and reqs[req_ind]['time']  <= timer:
-                    req = reqs[req_ind]
-                    engine.ExecuteReq(req['node_id'], req['content_id'], timer, 'output/networks.csv')
+                
+                # ============ 处理数据流请求 ============
+                # 根据新的 flows 模型：
+                # - src 节点是数据所有者，dst 节点是请求方
+                # - ExecuteReq(requester, content_id) 从 requester 向 owner 发送请求
+                while req_ind < len(flows) and flows[req_ind]['time'] <= timer:
+                    flow = flows[req_ind]
+                    # flow['src'] 是所有者（Owner），flow['dst'] 是请求方（Requester）
+                    engine.ExecuteReq(flow['dst'], flow['content_id'], timer, 'output/networks.csv')
                     req_ind += 1
+                    
                 timer += 100
                 tmp_timer += 100
                 time.sleep(0.1)
