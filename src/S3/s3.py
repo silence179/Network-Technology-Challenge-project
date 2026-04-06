@@ -31,15 +31,15 @@ FLOWS = {
         "burst_time_s": 180,
         "burst_bw_mbps": 40.0,
     },
-    "VIDEO_FLOW_UAV_02": {
-        "src": "UAV_02",
+    "VIDEO_FLOW_UAV_05": {
+        "src": "UAV_05",
         "priority": "NORMAL",
         "base_bw_mbps": 10.0,
         "burst_time_s": 300,
         "burst_bw_mbps": 40.0,
     },
-    "VIDEO_FLOW_UAV_03": {
-        "src": "UAV_03",
+    "VIDEO_FLOW_UAV_10": {
+        "src": "UAV_10",
         "priority": "NORMAL",
         "base_bw_mbps": 10.0,
         "burst_time_s": 360,
@@ -242,14 +242,37 @@ def build_flow_requests(active_nodes):
     node_set = set(active_nodes)
 
     if "GS_01" in node_set:
-        active_uavs = sorted(node_id for node_id in node_set if node_id.startswith("UAV_"))
-        for uav in active_uavs:
+        # 指定只跟 UAV_01, UAV_05, UAV_10 进行通讯
+        target_uav_names = ["UAV_01", "UAV_05", "UAV_10"]
+        target_uavs = [uav for uav in target_uav_names if uav in node_set]
+
+        for uav in target_uavs:
             requests.append(("CTRL_FLOW", "GS_01", uav, FLOWS["CTRL_FLOW"]))
 
-    if "GS_01" in node_set:
-        for flow_name, flow_cfg in FLOWS.items():
-            if flow_name.startswith("VIDEO_FLOW_") and flow_cfg["src"] in node_set:
-                requests.append((flow_name, flow_cfg["src"], "GS_01", flow_cfg))
+        import copy
+        for i, uav in enumerate(target_uavs):
+            flow_name = f"VIDEO_FLOW_{uav}"
+            # 兼容如果已经配了的就用原来的，没有的话顺延自动生成
+            if flow_name in FLOWS:
+                requests.append((flow_name, uav, "GS_01", FLOWS[flow_name]))
+            else:
+                cfg = {
+                    "src": uav,
+                    "priority": "NORMAL",
+                    "base_bw_mbps": 10.0,
+                    "burst_time_s": 180 + i * 60,
+                    "burst_bw_mbps": 40.0,
+                }
+                requests.append((flow_name, uav, "GS_01", cfg))
+
+        # 设定一个具体的 UAV -> UAV 通讯场景 (例如 UAV_01 到 UAV_05)
+        if "UAV_01" in node_set and "UAV_05" in node_set:
+            inter_uav_cfg = {
+                "src": "UAV_01",
+                "priority": "HIGH",
+                "base_bw_mbps": 2.0,
+            }
+            requests.append(("INTER_UAV_FLOW_UAV_01_UAV_05", "UAV_01", "UAV_05", inter_uav_cfg))
 
     return requests
 
