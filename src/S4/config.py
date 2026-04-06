@@ -1,10 +1,10 @@
 MODE = "soft" # 模式选择，“soft”为mode b，其他是mode a, mode a为开发半成品，不推荐使用
 
-csv_dir = "../S3/outputs/output_50/links" # csv文件夹路径，存储网络拓扑信息
-rules_dir = "../S3/outputs/output_50/rules" # json文件夹路径，存储路由规则
+csv_dir = "../S3/outputs/output_25/links" # csv文件夹路径，存储网络拓扑信息
+rules_dir = "../S3/outputs/output_25/rules" # json文件夹路径，存储路由规则
 
-sat_dir = "../S3/traces/sat_trace_50"
-uav_csv = "../S3/traces/uav_trace/uav_trace_full.csv"
+sat_dir = "../S3/traces/sat_trace_25"
+uav_csv = "../S3/traces/uav_trace_full.csv"
 
 
 from enum import Enum
