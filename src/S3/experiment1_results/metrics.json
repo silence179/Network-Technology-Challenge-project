@@ -1,0 +1,20 @@
+{
+  "baseline1": {
+    "avg_completion_time_ms": 4005.8587661030656,
+    "total_traffic_gb": 19.53125,
+    "cache_hit_ratio": 0.0,
+    "backhaul_ratio": 1.0
+  },
+  "baseline2": {
+    "avg_completion_time_ms": 4001.650673412842,
+    "total_traffic_gb": 5.99609375,
+    "cache_hit_ratio": 0.99,
+    "backhaul_ratio": 0.01
+  },
+  "your_method": {
+    "avg_completion_time_ms": 2295.771378507369,
+    "total_traffic_gb": 3.9501953125,
+    "cache_hit_ratio": 0.995,
+    "backhaul_ratio": 0.005
+  }
+}
