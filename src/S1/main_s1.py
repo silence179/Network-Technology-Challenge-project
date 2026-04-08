@@ -22,7 +22,7 @@ OBS_ELE = 459.0  # 救援中心海拔（米）
 # 3. 卫星筛选配置
 MIN_ALT_DEG = 0  # 最小仰角（地平线以上）
 MAX_DIST_KM = 2000  # 最大距离（2000km）
-MAX_SAT_COUNT = 25  # 最终输出卫星数量
+MAX_SAT_COUNT = 4  # 最终输出卫星数量
 IP_PREFIX = "10.0.3."  # 卫星IP前缀
 
 # 4. 文件配置
@@ -42,7 +42,7 @@ CHUNK_DURATION_SEC = 60  # 每个文件的时间切片（60秒）
 
 # 5. 动态筛选配置
 DYNAMIC_FILTER_INTERVAL_SEC = 60  # 动态筛选时间窗口（每60秒重新筛选一次）
-RESELECT_SAT_COUNT = 25  # 每次动态筛选保留的卫星数
+RESELECT_SAT_COUNT = 4  # 每次动态筛选保留的卫星数
 
 # ======================== 工具函数 ========================
 '''
