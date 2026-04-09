@@ -14,7 +14,7 @@ ANCHOR_LAT = 30
 ANCHOR_LON = 104 
 ANCHOR_ALT = 459
 
-NUM_UAVS = 3               # 无人机数量
+NUM_UAVS = 5               # 无人机数量
 SEARCH_RADIUS_M = 2500     # 搜索覆盖半径 2.5km
 ALTITUDE_M = 50            # 飞行相对高度 50m
 DETECTION_RANGE_M = 60     # 无人机传感器检测半径
