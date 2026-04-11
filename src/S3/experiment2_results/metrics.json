@@ -1,0 +1,29 @@
+{
+  "baseline1": {
+    "route_flaps": 673,
+    "success_rate": 0.353,
+    "avg_delay_ms": 3.4886996839984032,
+    "jitter_ms": 2.7477681413197983,
+    "avg_recovery_steps": 3.3177083333333335,
+    "max_recovery_steps": 22,
+    "total_requests": 1000
+  },
+  "baseline2": {
+    "route_flaps": 421,
+    "success_rate": 0.416,
+    "avg_delay_ms": 3.3330355825992064,
+    "jitter_ms": 2.065493042224763,
+    "avg_recovery_steps": 3.2670454545454546,
+    "max_recovery_steps": 20,
+    "total_requests": 1000
+  },
+  "your_method": {
+    "route_flaps": 376,
+    "success_rate": 0.735,
+    "avg_delay_ms": 3.8434627060590008,
+    "jitter_ms": 1.0410128622582506,
+    "avg_recovery_steps": 2.9431818181818183,
+    "max_recovery_steps": 17,
+    "total_requests": 1000
+  }
+}
