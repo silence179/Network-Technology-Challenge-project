@@ -16,15 +16,60 @@ export async function initSystem(viewer) {
         }
         viewer.scene.globe.depthTestAgainstTerrain = true;
 
-        const [topoRes, traceRes, satRes] = await Promise.all([
-            fetch('/mock_topology.csv').then(r => r.text()),
-            fetch('/mock_trace.csv').then(r => r.text()),
-            fetch('/mock_sat.csv').then(r => r.text())
+        // 定义数据文件路径（相对于public目录）
+        const satFiles = [
+            '/data/sat_trace/sat_trace_0_59999.csv',
+            '/data/sat_trace/sat_trace_60000_119999.csv',
+            '/data/sat_trace/sat_trace_120000_179999.csv',
+            '/data/sat_trace/sat_trace_180000_239999.csv',
+            '/data/sat_trace/sat_trace_240000_299999.csv',
+            '/data/sat_trace/sat_trace_300000_359999.csv',
+            '/data/sat_trace/sat_trace_360000_419999.csv',
+            '/data/sat_trace/sat_trace_420000_479999.csv',
+            '/data/sat_trace/sat_trace_480000_539999.csv',
+            '/data/sat_trace/sat_trace_540000_599999.csv'
+        ];
+        const topoFiles = [
+            '/data/topology_links/topology_links_0_59900.csv',
+            '/data/topology_links/topology_links_60000_119900.csv',
+            '/data/topology_links/topology_links_120000_179900.csv',
+            '/data/topology_links/topology_links_180000_239900.csv',
+            '/data/topology_links/topology_links_240000_299900.csv',
+            '/data/topology_links/topology_links_300000_359900.csv',
+            '/data/topology_links/topology_links_360000_419900.csv',
+            '/data/topology_links/topology_links_420000_479900.csv',
+            '/data/topology_links/topology_links_480000_539900.csv',
+            '/data/topology_links/topology_links_540000_599900.csv'
+        ];
+        const uavFile = ['/data/uav_trace_full.csv'];
+
+        // 辅助函数：加载多个CSV文件并合并数据
+        const loadMultipleCSV = async (filePaths) => {
+            const promises = filePaths.map(path => 
+                fetch(path).then(r => {
+                    if (!r.ok) throw new Error(`Failed to fetch ${path}: ${r.status}`);
+                    return r.text();
+                }).then(text => {
+                    const parsed = Papa.parse(text, { header: true, dynamicTyping: true, skipEmptyLines: true });
+                    return parsed.data;
+                }).catch(err => {
+                    console.error(`Error loading ${path}:`, err);
+                    return []; // 返回空数组以避免中断
+                })
+            );
+            const results = await Promise.all(promises);
+            return results.flat();
+        };
+
+        // 并行加载拓扑、无人机轨迹、卫星轨迹数据
+        const [topoRows, traceRows, satRows] = await Promise.all([
+            loadMultipleCSV(topoFiles),
+            loadMultipleCSV(uavFile),
+            loadMultipleCSV(satFiles)
         ]);
 
-        // 解析拓扑 CSV，字段参照：time_ms, src, dst, direction, distance_km, delay_ms,
-        // jitter_ms, loss_pct, bw_mbps, max_queue_pkt, quality, status, type
-        Papa.parse(topoRes, { header: true, dynamicTyping: true, skipEmptyLines: true }).data.forEach(row => {
+        // 处理拓扑数据行
+        topoRows.forEach(row => {
             const src = row.src ? String(row.src).trim() : '';
             const dst = row.dst ? String(row.dst).trim() : '';
             if (!src || !dst) return;
@@ -51,8 +96,7 @@ export async function initSystem(viewer) {
             });
         });
 
-        const traceRows = Papa.parse(traceRes, { header: true, dynamicTyping: true }).data;
-        const satRows = Papa.parse(satRes, { header: true, dynamicTyping: true }).data;
+        // 合并无人机和卫星轨迹数据
         const combined = [...traceRows, ...satRows];
 
         const groups = new Map();
@@ -172,45 +216,64 @@ export async function initSystem(viewer) {
         }
 
         // 动态刷新下拉选择器：只显示在当前时间有位置数据的实体
+        // 使用防抖机制减少调用频率
+        let refreshSelectorTimeout = null;
         const refreshSelector = () => {
-            const sel = document.getElementById('node-selector');
-            if (!sel) return;
-            const current = viewer.clock.currentTime;
-            const prev = sel.value;
-            sel.innerHTML = '';
-            const overview = document.createElement('option');
-            overview.value = '';
-            overview.innerText = 'Overview';
-            sel.appendChild(overview);
-
-            for (const [nid, entity] of shared.entityMap.entries()) {
-                try {
-                    const pos = entity.position && entity.position.getValue(current);
-                    if (pos) {
-                        const info = shared.nodeInfoList.find(n => n.id === nid) || { id: nid };
-                        const opt = document.createElement('option');
-                        opt.value = nid; opt.innerText = info.name || nid;
-                        sel.appendChild(opt);
-                    }
-                } catch (e) {
-                    // ignore entities that can't provide a value at current time
-                }
+            // 清除之前的定时器
+            if (refreshSelectorTimeout) {
+                clearTimeout(refreshSelectorTimeout);
             }
+            
+            // 设置新的定时器，延迟100ms执行，避免频繁调用
+            refreshSelectorTimeout = setTimeout(() => {
+                const sel = document.getElementById('node-selector');
+                if (!sel) return;
+                const current = viewer.clock.currentTime;
+                const prev = sel.value;
+                sel.innerHTML = '';
+                const overview = document.createElement('option');
+                overview.value = '';
+                overview.innerText = 'Overview';
+                sel.appendChild(overview);
 
-            if (prev) {
-                const exists = Array.from(sel.options).some(o => o.value === prev);
-                if (exists) sel.value = prev;
-                else {
-                    // 如果之前选中的目标不再可用，重置追踪
-                    if (shared.state.currentTarget === prev) {
-                        shared.state.currentTarget = null;
-                        viewer.trackedEntity = undefined;
+                // 限制处理的实体数量，避免性能问题
+                const maxEntitiesToProcess = 100;
+                let processedCount = 0;
+                
+                for (const [nid, entity] of shared.entityMap.entries()) {
+                    if (processedCount >= maxEntitiesToProcess) break;
+                    
+                    try {
+                        const pos = entity.position && entity.position.getValue(current);
+                        if (pos) {
+                            const info = shared.nodeInfoList.find(n => n.id === nid) || { id: nid };
+                            const opt = document.createElement('option');
+                            opt.value = nid; opt.innerText = info.name || nid;
+                            sel.appendChild(opt);
+                            processedCount++;
+                        }
+                    } catch (e) {
+                        // ignore entities that can't provide a value at current time
                     }
                 }
-            }
+
+                if (prev) {
+                    const exists = Array.from(sel.options).some(o => o.value === prev);
+                    if (exists) sel.value = prev;
+                    else {
+                        // 如果之前选中的目标不再可用，重置追踪
+                        if (shared.state.currentTarget === prev) {
+                            shared.state.currentTarget = null;
+                            viewer.trackedEntity = undefined;
+                        }
+                    }
+                }
+                
+                refreshSelectorTimeout = null;
+            }, 100); // 延迟100ms执行
         };
 
-        // 首次填充并在时钟进度上更新
+        // 首次填充并在时钟进度上更新（使用防抖版本）
         refreshSelector();
         viewer.clock.onTick.addEventListener(refreshSelector);
 
