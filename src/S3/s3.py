@@ -93,7 +93,7 @@ def get_satellite_scale_label(sat_dir):
     return sat_name
 
 
-def load_and_merge_traces(sat_dir="traces/sat_trace", uav_file="traces/uav_trace_full.csv"):
+def load_and_merge_traces(sat_dir="traces/sat_trace_4", uav_file="traces/uav_trace_full_5uav.csv"):
     sat_files = sorted(glob.glob(os.path.join(sat_dir, "*.csv")))
     sat_frames = [pd.read_csv(file_path) for file_path in sat_files]
     df_sat = pd.concat(sat_frames, ignore_index=True) if sat_frames else pd.DataFrame()
@@ -358,8 +358,8 @@ def save_chunk(output_link_dir, output_rule_dir, chunk_idx, start_ms, end_ms, ch
 
 def main():
     parser = argparse.ArgumentParser(description="Standalone optimized S3 routing script")
-    parser.add_argument("sat_dir", nargs="?", default="traces/sat_trace")
-    parser.add_argument("--uav-file", default="traces/uav_trace_full.csv")
+    parser.add_argument("sat_dir", nargs="?", default="traces/sat_trace_4")
+    parser.add_argument("--uav-file", default="traces/uav_trace_full_5uav.csv")
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--no-save", action="store_true")
     args = parser.parse_args()
