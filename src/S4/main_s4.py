@@ -181,7 +181,7 @@ def run():
                 
                 timer += 100
                 tmp_timer += 100
-                time.sleep(0.05)
+                # time.sleep(0.05)
         except KeyboardInterrupt:
             return
 
