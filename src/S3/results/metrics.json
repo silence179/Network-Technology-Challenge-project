@@ -56,11 +56,11 @@
     "avg_diversity": 83.09
   },
   "olcp": {
-    "avg_delay_ms": 2290.788229383553,
-    "total_traffic_gb": 9.9609375,
-    "hit_rate": 0.998,
-    "backhaul_rate": 0.0020000000000000018,
+    "avg_delay_ms": 2324.516837291045,
+    "total_traffic_gb": 10.107421875,
+    "hit_rate": 0.965,
+    "backhaul_rate": 0.035,
     "solve_time_ms": 20094.741582870483,
-    "avg_diversity": 99.36
+    "avg_diversity": 93.21
   }
 }
