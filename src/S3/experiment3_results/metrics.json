@@ -1,0 +1,32 @@
+{
+  "baseline1": {
+    "success_rate": 0.44,
+    "avg_service_delay_ms": 849.2968660603827,
+    "blind_zone_rescue_rate": 0.0,
+    "avg_recovery_steps": 58.333333333333336,
+    "overload_events": 0,
+    "relay_usage": 0,
+    "requests": 1000,
+    "blocked_requests": 560
+  },
+  "baseline2": {
+    "success_rate": 0.677,
+    "avg_service_delay_ms": 754.4828224934521,
+    "blind_zone_rescue_rate": 0.4232142857142857,
+    "avg_recovery_steps": 3.8,
+    "overload_events": 189,
+    "relay_usage": 504,
+    "requests": 1000,
+    "blocked_requests": 560
+  },
+  "your_method": {
+    "success_rate": 0.874,
+    "avg_service_delay_ms": 662.7368326036867,
+    "blind_zone_rescue_rate": 0.775,
+    "avg_recovery_steps": 2.0,
+    "overload_events": 207,
+    "relay_usage": 520,
+    "requests": 1000,
+    "blocked_requests": 560
+  }
+}

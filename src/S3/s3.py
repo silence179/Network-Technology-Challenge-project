@@ -242,12 +242,11 @@ def build_flow_requests(active_nodes):
     node_set = set(active_nodes)
 
     if "GS_01" in node_set:
-        # 指定只跟 UAV_01, UAV_05, UAV_10 进行通讯
-        target_uav_names = ["UAV_01", "UAV_05", "UAV_10"]
-        target_uavs = [uav for uav in target_uav_names if uav in node_set]
+        # 所有在线 UAV 都有控制流 + 视频流
+        target_uavs = sorted([n for n in node_set if n.startswith("UAV_")])
 
         for uav in target_uavs:
-            requests.append(("CTRL_FLOW", "GS_01", uav, FLOWS["CTRL_FLOW"]))
+            requests.append((f"CTRL_FLOW_{uav}", "GS_01", uav, FLOWS["CTRL_FLOW"]))
 
         import copy
         for i, uav in enumerate(target_uavs):

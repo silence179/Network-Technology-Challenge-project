@@ -21,16 +21,16 @@ export function update2DTopology(viewer) {
     // 获取容器宽高，用于计算固定节点的位置
     const width = container.clientWidth || 800;
     const height = container.clientHeight || 600;
-    const nodeCount = shared.nodeInfoList.length || 1;
-
-    // 预先找出所有 GS 节点，用于均匀分布在底部
-    const gsNodes = shared.nodeInfoList.filter(n => getNodeType(n.name) === 'GS');
-    const gsCount = gsNodes.length || 1;
-
+    
     // 辅助函数：生成节点的通用属性（包含固定位置、大小、斥力值等）
-    const generateNodeProps = (n, index) => {
+    const generateNodeProps = (n, index, connectedNodes) => {
         const type = getNodeType(n.name);
         const isGS = type === 'GS';
+        
+        // 计算基于连接节点的统计
+        const totalNodeCount = connectedNodes.length || 1;
+        const gsNodes = connectedNodes.filter(node => getNodeType(node.name) === 'GS');
+        const gsCount = gsNodes.length || 1;
         
         let x, y, fixed;
         if (isGS) {
@@ -41,13 +41,13 @@ export function update2DTopology(viewer) {
             fixed = true;    // 开启固定
         } else {
             // 其他节点初始按圆形分布在上方
-            const angle = (index / nodeCount) * Math.PI * 2;
+            const angle = (index / totalNodeCount) * Math.PI * 2;
             const radius = Math.min(width, height) * 0.35;
             x = width / 2 + Math.cos(angle) * radius;
             y = height / 2 - 50 + Math.sin(angle) * radius;
             fixed = false;
         }
-
+        
         return {
             id: String(n.id),
             name: n.name,
@@ -71,11 +71,14 @@ export function update2DTopology(viewer) {
     if (!shared.chart2D) {
         shared.chart2D = echarts.init(container, 'dark');
 
-        const baseRepulsion = Math.min(2000, 600 + nodeCount * 18);
-        const baseEdgeLength = Math.min(300, 120 + nodeCount * 4);
+        // 初始化时使用所有节点计算参数
+        const initTotalNodeCount = shared.nodeInfoList.length || 1;
+        const baseRepulsion = Math.min(2000, 600 + initTotalNodeCount * 18);
+        const baseEdgeLength = Math.min(300, 120 + initTotalNodeCount * 4);
         const baseGravity = 0.15;
 
-        const initialNodesWithPos = shared.nodeInfoList.map((n, i) => generateNodeProps(n, i));
+        // 初始化时显示所有节点
+        const initialNodesWithPos = shared.nodeInfoList.map((n, i) => generateNodeProps(n, i, shared.nodeInfoList));
 
         shared.chart2D.setOption({
             backgroundColor: 'transparent',
@@ -125,7 +128,19 @@ export function update2DTopology(viewer) {
     // 更新连线数据
     const ms = Cesium.JulianDate.secondsDifference(viewer.clock.currentTime, shared.startUtc) * 1000;
     const edges = [];
-    shared.nodeInfoList.forEach((n1, i) => {
+    const connectedNodeIds = new Set(); // 记录有连接的节点ID
+    
+    // 性能优化：如果节点数量太多，限制计算量
+    const nodeCount = shared.nodeInfoList.length;
+    const maxNodesToProcess = 50; // 限制处理的节点数量
+    
+    // 只处理前 maxNodesToProcess 个节点，避免 O(n²) 复杂度导致性能问题
+    const nodesToProcess = nodeCount > maxNodesToProcess ? 
+        shared.nodeInfoList.slice(0, maxNodesToProcess) : 
+        shared.nodeInfoList;
+    
+    nodesToProcess.forEach((n1, i) => {
+        // 对于每个节点，只检查与后续节点的连接
         shared.nodeInfoList.slice(i + 1).forEach(n2 => {
             const status = getLinkStatus(n1.id, n2.id, ms);
             if (status) {
@@ -134,8 +149,35 @@ export function update2DTopology(viewer) {
                 // 核心逻辑：卫星之间的连线极短(value小)，涉及GS/UAV的连线长(value大)
                 const edgeValue = (type1 === 'SAT' && type2 === 'SAT') ? 10 : 100;
                 edges.push({ source: String(n1.id), target: String(n2.id), status, value: edgeValue });
+                // 记录有连接的节点
+                connectedNodeIds.add(String(n1.id));
+                connectedNodeIds.add(String(n2.id));
             }
         });
+    });
+    
+    // 获取当前时间
+    const currentTime = viewer.clock.currentTime;
+    
+    // 过滤节点：只显示有连接的节点，并且当前时间有位置数据的节点
+    const connectedNodes = shared.nodeInfoList.filter(n => {
+        // 检查是否有连接
+        if (!connectedNodeIds.has(String(n.id))) {
+            return false;
+        }
+        
+        // 检查当前时间是否有位置数据
+        const entity = shared.entityMap.get(n.id);
+        if (!entity || !entity.position || !entity.position.getValue) {
+            return false;
+        }
+        
+        try {
+            const position = entity.position.getValue(currentTime);
+            return position !== undefined && position !== null;
+        } catch (e) {
+            return false;
+        }
     });
 
     const currentEdgesString = JSON.stringify(edges.map(e => e.source + e.target + e.status).sort());
@@ -145,8 +187,8 @@ export function update2DTopology(viewer) {
     // 渲染更新
     shared.chart2D.setOption({
         series: [{
-            // 每次更新都重新获取节点的各项属性，确保固定的 GS 不会被力导向重置飘走
-            data: shared.nodeInfoList.map((n, i) => generateNodeProps(n, i)),
+            // 只显示有连接的节点
+            data: connectedNodes.map((n, i) => generateNodeProps(n, i, connectedNodes)),
             links: edges.map(e => ({ 
                 source: e.source, 
                 target: e.target, 

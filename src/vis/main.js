@@ -3,6 +3,7 @@ import 'cesium/Build/Cesium/Widgets/widgets.css';
 import { shared } from './lib/state.js';
 import { initSystem } from './lib/initSystem.js';
 import { update2DTopology } from './lib/topo2d.js';
+import { updatePerformanceChart, startPerformanceUpdates, stopPerformanceUpdates } from './lib/perf2d.js';
 
 Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNjdhNjdjZC1mMjA0LTQwMWEtYTcwYi02MTA5YWY5ZTZhYzEiLCJpZCI6Mzg4MDQ1LCJpYXQiOjE3NzA0Mzc0MTR9.Dfqi_zBqKJV_Yia-9waxWRMQ5VkYP4IAkQin7t5vVao';
 
@@ -35,6 +36,24 @@ window.toggleOption = (type) => {
             appView.style.height = '100%';
             if (right) right.style.display = 'block';
         }
+    } else if (type === 'PERF') {
+        shared.state.showPerformance = !shared.state.showPerformance;
+        const perfView = document.getElementById('performance-view');
+        const appView = document.getElementById('app');
+        if (shared.state.showPerformance) {
+            perfView.style.height = '40%';
+            appView.style.height = '60%';
+            // 更新性能图表
+            setTimeout(() => { 
+                updatePerformanceChart(); 
+                shared.perfChart?.resize();
+                startPerformanceUpdates(viewer);
+            }, 400);
+        } else {
+            perfView.style.height = '0';
+            appView.style.height = '100%';
+            stopPerformanceUpdates();
+        }
     }
 };
 
@@ -60,4 +79,6 @@ window.selectTarget = (id) => {
 
 initSystem(viewer);
 
-// 
+// 初始化性能图表更新
+// 注意：这里不立即启动更新，只在窗口打开时启动
+//
