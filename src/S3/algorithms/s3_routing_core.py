@@ -200,10 +200,27 @@ class SimulationStats:
 
 
 def load_and_merge_traces(sat_dir="traces/sat_trace", uav_file="traces/uav_trace_full.csv"):
+    def resolve_uav_file(path):
+        candidates = [path]
+        basename = os.path.basename(path)
+        parent_dir = os.path.dirname(path)
+        nested_candidate = os.path.join(parent_dir, "uav_trace", basename)
+        flat_candidate = os.path.join(parent_dir, basename)
+
+        for candidate in (nested_candidate, flat_candidate):
+            if candidate not in candidates:
+                candidates.append(candidate)
+
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                return candidate
+        return path
+
     sat_files = sorted(glob.glob(os.path.join(sat_dir, "*.csv")))
     sat_frames = [pd.read_csv(file_path) for file_path in sat_files]
     df_sat = pd.concat(sat_frames, ignore_index=True) if sat_frames else pd.DataFrame()
-    df_uav = pd.read_csv(uav_file) if os.path.exists(uav_file) else pd.DataFrame()
+    resolved_uav_file = resolve_uav_file(uav_file)
+    df_uav = pd.read_csv(resolved_uav_file) if os.path.exists(resolved_uav_file) else pd.DataFrame()
     timelines = sorted(df_uav["time_ms"].unique()) if not df_uav.empty else []
     return df_sat, df_uav, timelines
 

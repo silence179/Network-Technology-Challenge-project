@@ -28,5 +28,85 @@
     "relay_usage": 520,
     "requests": 1000,
     "blocked_requests": 560
+  },
+  "nocache": {
+    "success_rate": 0.0,
+    "avg_service_delay_ms": 1200.0,
+    "blind_zone_rescue_rate": 0.0,
+    "avg_recovery_steps": 0.0,
+    "overload_events": 0,
+    "relay_usage": 0,
+    "requests": 1000,
+    "blocked_requests": 560
+  },
+  "lce_lru": {
+    "success_rate": 0.191,
+    "avg_service_delay_ms": 1407.778567962552,
+    "blind_zone_rescue_rate": 0.2017857142857143,
+    "avg_recovery_steps": 0.0,
+    "overload_events": 0,
+    "relay_usage": 113,
+    "requests": 1000,
+    "blocked_requests": 560
+  },
+  "greedy": {
+    "success_rate": 0.199,
+    "avg_service_delay_ms": 1416.4746826463402,
+    "blind_zone_rescue_rate": 0.20892857142857144,
+    "avg_recovery_steps": 0.0,
+    "overload_events": 0,
+    "relay_usage": 117,
+    "requests": 1000,
+    "blocked_requests": 560
+  },
+  "madrl": {
+    "success_rate": 0.246,
+    "avg_service_delay_ms": 1467.6299439990048,
+    "blind_zone_rescue_rate": 0.21785714285714286,
+    "avg_recovery_steps": 0.0,
+    "overload_events": 0,
+    "relay_usage": 122,
+    "requests": 1000,
+    "blocked_requests": 560
+  },
+  "submod": {
+    "success_rate": 0.606,
+    "avg_service_delay_ms": 1859.2987386513853,
+    "blind_zone_rescue_rate": 0.5910714285714286,
+    "avg_recovery_steps": 0.0,
+    "overload_events": 0,
+    "relay_usage": 331,
+    "requests": 1000,
+    "blocked_requests": 560
+  },
+  "spacecache": {
+    "success_rate": 0.452,
+    "avg_service_delay_ms": 1691.7384421869688,
+    "blind_zone_rescue_rate": 0.44642857142857145,
+    "avg_recovery_steps": 0.0,
+    "overload_events": 0,
+    "relay_usage": 250,
+    "requests": 1000,
+    "blocked_requests": 560
+  },
+  "myopic": {
+    "success_rate": 0.596,
+    "avg_service_delay_ms": 1848.4179293656357,
+    "blind_zone_rescue_rate": 0.5839285714285715,
+    "avg_recovery_steps": 0.0,
+    "overload_events": 0,
+    "relay_usage": 327,
+    "requests": 1000,
+    "blocked_requests": 560
+  },
+  "otcp": {
+    "success_rate": 1.0,
+    "avg_service_delay_ms": 2287.7952870003105,
+    "blind_zone_rescue_rate": 1.0,
+    "avg_recovery_steps": 0.0,
+    "overload_events": 0,
+    "relay_usage": 560,
+    "requests": 1000,
+    "blocked_requests": 560
   }
 }

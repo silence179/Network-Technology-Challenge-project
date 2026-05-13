@@ -1,5 +1,20 @@
 # 实验二：动态拓扑稳定性验证（关键加分项）
 
+## 文档状态（2026-05）
+
+当前版本的 `experiment2_topology_stability.py` 已将新增 8 个内容/缓存 baseline 接入原始实验，最终会在同一份 `metrics.json` 中输出 11 个方法：
+
+- 原始稳定性方法：`baseline1`、`baseline2`、`your_method`
+- 桥接接入方法：`nocache`、`lce_lru`、`greedy`、`madrl`、`submod`、`spacecache`、`myopic`、`otcp`
+
+这里的新增方法通过 `algorithms/code/project_experiment_bridge.py` 适配进拓扑稳定性场景：每条 `UAV -> GS_01` 持续流会映射到一个固定 `content_id`，再用当前/未来拓扑快照求放置并解析路径。因此，`success_rate`、`route_flaps`、`avg_recovery_steps` 是当前版本最适合跨族比较的指标；`avg_delay_ms` 与 `jitter_ms` 仍保留各自实现的原生语义。
+
+为避免新增算法在该场景里因为“固定 5 条流 + 容量足够”而全部收敛到同一结果，当前版本额外引入了：
+
+- 时变热点内容窗口：每条流不再永远固定一个 `content_id`
+- 共享热点周期：多个 UAV 会阶段性竞争同一批热门内容
+- 业务时限：超过时限的内容服务记为失败，从而把 hit / miss 的差异反映到成功率和恢复指标上
+
 ## 实验目标
 
 验证"内容-拓扑协同路由"在**动态变化网络**中的稳定性优势，核心命题：
@@ -49,6 +64,21 @@
 - **延迟就近备选**: 切换时优先选择延迟接近当前路径的备份（60% 稳定性权重 + 40% 延迟接近度）
 - **即时故障切换**: 路径断裂时零延迟切换到预缓存备选路径 → 恢复时间最短
 
+### 新增 8 个内容放置 baseline（桥接接入）
+
+新增方法来自 `algorithms/code/`：
+
+- `nocache`
+- `lce_lru`
+- `greedy`
+- `madrl`
+- `submod`
+- `spacecache`
+- `myopic`
+- `otcp`
+
+它们不是原始实验里的“路径控制器”，而是通过桥接层把持续流映射为内容请求，并把求得的放置结果还原成当前步可用路径。因此这部分结果更适合解释“在动态拓扑下是否还能持续服务、是否更容易恢复”，而不是替代原始三方法的控制策略分析。
+
 ---
 
 ## 评估指标
@@ -62,21 +92,30 @@
 
 ---
 
-## 实验结果
+## 当前集成结果（11 方法）
 
-| 指标 | Baseline1 | Baseline2 | Your Method | 改善 |
-|------|-----------|-----------|-------------|------|
-| 路由重构次数 | 673 | 421 | **376** | **−44.1%** vs B1 |
-| 任务完成率 | 35.3% | 41.6% | **73.5%** | **+38.2pp** vs B1 |
-| 时延抖动 | 2.75 | 2.07 | **1.04** | **−62.1%** vs B1 |
-| 恢复时间 | 3.32 | 3.27 | **2.94** | **−11.3%** vs B1 |
+当前 `metrics.json` 的核心摘要如下。为了避免混淆，这里优先展示跨族最稳妥的 3 个指标：
 
-### 关键结论
+| 方法 | Route Flaps | Success Rate | Avg Recovery (steps) |
+|------|-------------|--------------|----------------------|
+| Baseline1 | 653 | 36.5% | 3.32 |
+| Baseline2 | 385 | 45.2% | 3.41 |
+| Your Method | 339 | 72.7% | 2.64 |
+| NoCache | 0 | 0.0% | 0.00 |
+| LCE-LRU | 152 | 16.2% | 6.31 |
+| Greedy | 147 | 15.5% | 6.35 |
+| MADRL | 331 | 34.4% | 3.12 |
+| Submod | 577 | 60.9% | 2.32 |
+| SpaceCache | 509 | 54.5% | 2.47 |
+| Myopic | 597 | 63.4% | 2.39 |
+| OTCP | 471 | 76.1% | 2.71 |
 
-1. **路由稳定性**：Your Method 路由切换次数降低 44%，远超 Baseline 的频繁振荡
-2. **任务可靠性**：成功率 73.5%，比 Baseline1 高出 38 个百分点
-3. **抖动控制**：Gap-aware 抖动仅 1.04ms，比 Baseline1 降低 62%
-4. **快速恢复**：预缓存备选路径实现 2.94 步平均恢复，优于两个 Baseline
+### 当前版本的读法
+
+1. 在原始三方法里，`your_method` 仍然是最稳的一条主线：成功率最高、恢复也最快。
+2. 在桥接接入的新增方法里，`otcp` 现在明显高于其他新增方法，`myopic/submod/spacecache` 构成第二梯队，`lce_lru/greedy` 在动态热点 + 时限约束下明显吃亏。
+3. `nocache` 在这个版本里被清晰压成了 0% 成功率，说明“固定流 + 超大容忍度”造成的结果塌缩已经被消掉了。
+4. `avg_delay_ms` 与 `jitter_ms` 在原始三方法和新增八方法之间不是严格同构的时延定义；如果要看绝对时延解释，请直接查看 `metrics.json` 并结合桥接语义阅读。
 
 ---
 
@@ -100,10 +139,13 @@ experiment2_topology_stability.py
 │   ├── 历史故障惩罚
 │   └── 路径综合稳定性（min×0.7 + mean×0.3）
 │
-├── 三种路由算法
+├── 原始 3 方法 + 桥接接入的 8 个内容放置方法
 │   ├── AlgoBaseline1  — 含噪全局 Dijkstra + 丢包模型
 │   ├── AlgoBaseline2  — 保持直到断裂 + 2步恢复延迟
 │   └── AlgoYourMethod — 稳定性加权K最短路 + 主动监测 + 即时切换
+│
+├── 桥接层
+│   └── project_experiment_bridge.py — 内容放置结果到路径稳定性指标的映射
 │
 ├── 实验驱动
 │   └── run_experiment()  — 主循环 200 步
@@ -129,4 +171,4 @@ python experiment2_topology_stability.py
 |------|------|
 | `experiment2_comparison.png` | 四指标对比柱状图 |
 | `experiment2_delay_timeline.png` | 时延随时间变化时序图 |
-| `metrics.json` | 原始指标数据（JSON） |
+| `metrics.json` | 当前集成版 11 方法指标数据（JSON） |

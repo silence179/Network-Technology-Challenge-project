@@ -1,0 +1,21 @@
+{
+  "Algorithm": "DTN-CGR",
+  "Satellite Trace": "traces/sat_trace",
+  "Max Steps": 200,
+  "Runtime (s)": 2.19,
+  "Topology Compute Time (ms)": 10.455,
+  "Routing Compute Time (ms)": 319.196,
+  "Time Steps": 200,
+  "Flow Requests": 2600,
+  "Successful Routes": 2600,
+  "Failed Routes": 0,
+  "Route Success Rate (%)": 100.0,
+  "Total Rules": 2600,
+  "Avg Path Delay (ms)": 2.833,
+  "Avg Hop Count": 2.0,
+  "Avg Bottleneck BW (Mbps)": 20.0,
+  "Avg Active Links": 428.5,
+  "Peak Active Links": 431,
+  "Topology Changed Steps": 2,
+  "Topology Reuse Rate (%)": 99.0
+}

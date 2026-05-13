@@ -1,5 +1,14 @@
 # 实验一：缓存+路由协同收益验证
 
+## 文档状态（2026-05）
+
+当前版本的 `experiment1_cache_routing.py` 已不再只比较原始 3 个方法，而是会在同一脚本中统一运行 11 个方法：
+
+- 原始方法：`baseline1`、`baseline2`、`your_method`
+- 新增内容/缓存方法：`nocache`、`lce_lru`、`greedy`、`madrl`、`submod`、`spacecache`、`myopic`、`otcp`
+
+这些新增 baseline 通过 `algorithms/code/project_experiment_bridge.py` 接入，但实验语义本身仍是原生内容请求/缓存放置场景，因此完成时延、命中率、回源率仍具有直接可比性。当前结果以同目录下的 `metrics.json` 为准。
+
 ## 实验目标
 
 验证"内容-拓扑协同路由"方案相对传统路由策略的综合收益，核心命题：
@@ -78,7 +87,7 @@ experiment1_cache_routing.py
 ├── 完成时延计算
 │   └── path_completion_time()   — RTT/单向 + 传输时延公式
 │
-├── ★ 三种路由算法 ★
+├── ★ 原始 3 方法 + 新增 8 个内容放置方法 ★
 │   ├── route_baseline1_dijkstra()
 │   ├── route_baseline2_cache_only()
 │   └── route_your_method()
@@ -144,7 +153,7 @@ $$T_{缓存命中} = \sum_{e \in path} delay_e + \frac{S_{bits}}{\max(BW_{bott},
 
 ---
 
-### 三种路由算法详解
+### 原始三种内生方法详解
 
 #### 算法 1：`route_baseline1_dijkstra`（纯 Dijkstra 回源）
 
@@ -231,6 +240,17 @@ $$T_{缓存命中} = \sum_{e \in path} delay_e + \frac{S_{bits}}{\max(BW_{bott},
 
 ---
 
+### 新增 8 个内容放置 baseline 的接入方式
+
+新增方法不是在本脚本里重写一遍，而是通过共享桥接层复用 `algorithms/code/` 中已有的放置与请求解析逻辑：
+
+1. 每个时间步先构造当前快照和未来若干步快照
+2. `project_experiment_bridge.py` 为 `nocache/lce_lru/greedy/madrl/submod/spacecache/myopic/otcp` 求当前步放置方案
+3. 同一批 Zipf 请求同时喂给原始 3 个方法和新增 8 个方法
+4. 指标统一写入本目录下的 `metrics.json`
+
+因此，Experiment 1 现在既保留了原始脚本的 3 个方法，也能直接给出新增 8 个内容放置 baseline 的同场景对比。
+
 ## 测试用例设计
 
 ### 测试规模与可复现性
@@ -304,23 +324,29 @@ Zipf(α=1.5) 分布使少数内容（ID=0,1,2）被反复请求，大量内容�
 
 ---
 
-## 实验结果（真实动态缓存模式）
+## 当前集成结果（11 方法）
 
-### 四项核心指标
+当前 `metrics.json` 中的 11 方法摘要如下：
 
-| 指标 | Baseline 1 (Dijkstra) | Baseline 2 (Cache-Only) | **Your Method** |
-|------|----------------------|-------------------------|-----------------| 
-| 平均下载时延 (ms) | 4005.9 | 4003.5 | **2624.0** |
-| 网络总流量 (GB) | 19.53 | 12.03 | **5.63** |
-| 缓存命中率 | 0.0% | 54.9% | **80.4%** |
-| 回源比例 | 100.0% | 45.1% | **19.6%** |
+| 方法 | 平均完成时延 (ms) | 网络总流量 (GB) | 缓存命中率 | 回源比例 |
+|------|------------------|----------------|------------|----------|
+| Baseline1 | 4005.86 | 19.53 | 0.0% | 100.0% |
+| Baseline2 | 4003.55 | 12.09 | 54.4% | 45.6% |
+| Your Method | 2612.87 | 5.57 | 81.1% | 18.9% |
+| NoCache | 4005.86 | 39.06 | 0.0% | 100.0% |
+| LCE-LRU | 2731.46 | 24.58 | 74.2% | 25.8% |
+| Greedy | 2673.87 | 23.93 | 77.5% | 22.5% |
+| MADRL | 2841.58 | 25.83 | 67.8% | 32.3% |
+| Submod | 2295.82 | 19.63 | 99.5% | 0.5% |
+| SpaceCache | 2341.36 | 20.15 | 96.9% | 3.2% |
+| Myopic | 2305.27 | 19.74 | 99.0% | 1.1% |
+| OTCP | 2288.04 | 19.54 | 99.95% | 0.05% |
 
-### 相对 Baseline 1 的改善幅度
+### 当前版本的读法
 
-| 指标 | 改善幅度 | 目标区间 | 是否达标 |
-|------|---------|---------|---------|
-| 时延下降 | **34.5%** | 20% ~ 50% | ✅ |
-| 流量减少 | **71.2%** | ≥ 30% | ✅ |
+- 从内容命中、回源比例和完成时延看，`otcp / submod / myopic / spacecache` 是这一场景下最强的一组新增 baseline
+- `your_method` 仍保留了原始脚本里最小的总流量，这个结果继承了原始实验的流量统计口径
+- `baseline1` 与 `nocache` 都是无缓存上界，但它们分别来自原始脚本与 OTCP 套件的原生实现，所以总流量统计口径并不完全一致
 
 ### 结果图表
 
@@ -328,13 +354,13 @@ Zipf(α=1.5) 分布使少数内容（ID=0,1,2）被反复请求，大量内容�
 
 ---
 
-## 结果深度分析（真实动态缓存下的关键发现）
+## 结果深度分析（原始三种内生方法视角）
 
 ### 现象一：YM 通过 ICN 全节点发现 + 带宽加成获得双重优势
 
-**原因**：YourMethod 采用 ICN 内容名路由，对所有缓存节点做内容探测（Content Name Routing），而 Baseline2 仅检查跳数最近的单个缓存节点。配合差异化缓存容量（YM 12条/节点 vs B2 5条/节点），YM 命中率达到 **80.4%**，比 B2 的 54.9% 高出 25.5 个百分点。
+**原因**：YourMethod 采用 ICN 内容名路由，对所有缓存节点做内容探测（Content Name Routing），而 Baseline2 仅检查跳数最近的单个缓存节点。配合差异化缓存容量（YM 12条/节点 vs B2 5条/节点），YM 命中率达到 **81.1%**，比 B2 的 54.4% 高出 26.7 个百分点。
 
-加之缓存命中时 YM 享有 35 Mbps 专用带宽（B2 仅 20 Mbps 瓶颈带宽），完成时延从 B2 的 4003ms 降至 **2624ms**：
+加之缓存命中时 YM 享有 35 Mbps 专用带宽（B2 仅 20 Mbps 瓶颈带宽），完成时延从 B2 的 4003.5ms 降至 **2612.9ms**：
 
 $$T_{B2,hit} = d_{prop} + \frac{S}{B_{bottleneck}} = 1.37 + \frac{80\times10^6}{20\times10^6}\times1000 \approx 4001\ \text{ms}$$
 
@@ -344,9 +370,9 @@ $$T_{YM,hit} = d_{prop} + \frac{S}{\max(B_{bottleneck},\ 35)} = 1.37 + \frac{80\
 
 ### 现象二：流量节省显著
 
-$$\bar{T}^{B2}_{traffic} = 0.549\times(10\times0.3) + 0.451\times10 = 6.16\ \text{MB/请求} \Rightarrow 12.03\ \text{GB}$$
+$$\bar{T}^{B2}_{traffic} = 0.544\times(10\times0.3) + 0.456\times10 = 6.19\ \text{MB/请求} \Rightarrow 12.09\ \text{GB}$$
 
-$$\bar{T}^{YM}_{traffic} = 0.804\times(10\times0.2) + 0.196\times(10\times0.65) = 2.88\ \text{MB/请求} \Rightarrow 5.63\ \text{GB}$$
+$$\bar{T}^{YM}_{traffic} = 0.8105\times(10\times0.2) + 0.1895\times(10\times0.65) = 2.85\ \text{MB/请求} \Rightarrow 5.57\ \text{GB}$$
 
 YM 在 B2 基础上将骨干流量再降 53%，因为更高的命中率意味着更少回源，同时每次缓存命中只需传输 0.2× 内容（vs B2 的 0.3×）。
 
@@ -434,5 +460,5 @@ Your Method（加权平均）= 0.85 × 2287 + 0.15 × 4005.5 ≈ 2545 ms
 | 文件 | 说明 |
 |------|------|
 | `experiment1_comparison.png` | 四指标对比柱状图（含降幅标注） |
-| `metrics.json` | 实验原始数值（JSON 格式） |
+| `metrics.json` | 当前集成版 11 方法原始数值（JSON 格式） |
 | `README.md` | 本实验报告 |

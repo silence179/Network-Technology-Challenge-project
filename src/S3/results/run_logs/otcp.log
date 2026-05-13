@@ -1,0 +1,38 @@
+>>> Loading traces...
+    SAT files: 10, time steps: 6000
+>>> OLCP experiment: 100 steps, H=5
+  Step 0/100 (0.0s)
+  Step 20/100 (7.3s)
+  Step 40/100 (15.3s)
+  Step 60/100 (22.2s)
+  Step 80/100 (30.2s)
+>>> Completed in 38.4s
+
+====================================================================================================
+  OLCP Experiment Results
+====================================================================================================
+Method              Delay(ms)  Traffic(GB)   Hit Rate   Backhaul  Diversity  Solve(ms)
+----------------------------------------------------------------------------------------------------
+No-Cache               4006.2        31.25      0.0%    100.0%        0.0          0
+LCE-LRU                3575.4        27.33     25.1%     74.9%        0.0          0
+Greedy-Pop             3337.9        25.18     38.9%     61.1%        7.6          0
+MADRL-Cache            3035.2        23.16     56.5%     43.5%       56.7          0
+Submod-Greedy          2484.2        18.88     88.6%     11.4%       77.3        201
+SpaceCache+            2570.1        19.23     83.6%     16.4%       69.0        208
+Myopic-Opt             2473.4        18.09     89.2%     10.8%       80.8       2069
+OLCP (Ours)            2305.9        18.32     98.9%      1.1%       98.8      30073
+----------------------------------------------------------------------------------------------------
+
+  OLCP vs No-Cache: delay ↓42.4%, traffic ↓41.4%
+  OLCP vs LCE-LRU         : delay ↓35.5%, hit rate +73.9pp
+  OLCP vs Greedy-Pop      : delay ↓30.9%, hit rate +60.1pp
+  OLCP vs MADRL-Cache     : delay ↓24.0%, hit rate +42.4pp
+  OLCP vs Submod-Greedy   : delay ↓7.2%, hit rate +10.4pp
+  OLCP vs SpaceCache+     : delay ↓10.3%, hit rate +15.4pp
+  OLCP vs Myopic-Opt      : delay ↓6.8%, hit rate +9.8pp
+====================================================================================================
+>>> Figure saved: C:\Users\Xcroi\Desktop\Network-Technology-Challenge-project\src\S3\figures\experiment_results.png
+>>> Convergence figure saved: C:\Users\Xcroi\Desktop\Network-Technology-Challenge-project\src\S3\figures\convergence.png
+>>> CDF figure saved: C:\Users\Xcroi\Desktop\Network-Technology-Challenge-project\src\S3\figures\delay_cdf.png
+>>> Diversity figure saved: C:\Users\Xcroi\Desktop\Network-Technology-Challenge-project\src\S3\figures\cache_diversity.png
+>>> Metrics saved: C:\Users\Xcroi\Desktop\Network-Technology-Challenge-project\src\S3\results\metrics.json
