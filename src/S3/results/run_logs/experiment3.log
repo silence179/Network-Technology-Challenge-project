@@ -1,0 +1,28 @@
+>>> 加载轨迹数据...
+    卫星文件数: 10, 时间步数: 6000
+>>> 实验使用时间步数: 200
+   [进度] 0/200 (t=0ms)
+   [进度] 50/200 (t=5000ms)
+   [进度] 100/200 (t=10000ms)
+   [进度] 150/200 (t=15000ms)
+
+===========================================================================
+实验三结果汇总 — 无人机中继收益验证
+===========================================================================
+指标                             Baseline1   Baseline2  YourMethod
+---------------------------------------------------------------------------
+任务成功率                              44.0%       67.7%       87.4%
+业务完成时延 (ms)                       849.30      754.48      662.74
+盲区救援率                               0.0%       42.3%       77.5%
+平均恢复时间 (steps)                     58.33        3.80        2.00
+中继过载次数                              0.00      189.00      207.00
+---------------------------------------------------------------------------
+Your Method vs Baseline1:
+  成功率提升:   +43.4pp
+  时延降低:     22.0%
+  盲区救援率:   +77.5pp
+  恢复加速:     96.6%
+===========================================================================
+>>> 图表已保存: C:\Users\Xcroi\Desktop\Network-Technology-Challenge-project\src\S3\experiment3_results\experiment3_comparison.png
+>>> 时序图已保存: C:\Users\Xcroi\Desktop\Network-Technology-Challenge-project\src\S3\experiment3_results\experiment3_timeline.png
+>>> 指标数据已保存: C:\Users\Xcroi\Desktop\Network-Technology-Challenge-project\src\S3\experiment3_results\metrics.json

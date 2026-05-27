@@ -23,6 +23,7 @@ import json
 import math
 import os
 import random
+import sys
 from collections import defaultdict
 
 import matplotlib
@@ -35,7 +36,23 @@ import pandas as pd
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 TRACES_DIR = os.path.join(SCRIPT_DIR, '..', 'traces')
+
+from algorithms.code import config as content_cfg
+from algorithms.code.project_experiment_bridge import (
+    METHOD_COLORS as EXTRA_METHOD_COLORS,
+    METHOD_LABELS as EXTRA_METHOD_LABELS,
+    SUPPORTED_CONTENT_METHODS,
+    advance_runtime_state,
+    build_snapshot_view,
+    initial_runtime_state,
+    resolve_request,
+    solve_method_placement,
+)
 
 
 def _set_chinese_font():
@@ -88,9 +105,32 @@ BLOCK_WINDOWS = {
     'UAV_04': [(40, 130)],
     'UAV_05': [(25, 70), (85, 155), (165, 200)],
 }
+BLIND_ZONE_START = min(start for windows in BLOCK_WINDOWS.values() for start, _ in windows)
 
 random.seed(42)
 np.random.seed(42)
+
+ORIGINAL_METHODS = ('baseline1', 'baseline2', 'your_method')
+EXTRA_METHODS = tuple(SUPPORTED_CONTENT_METHODS)
+METHOD_ORDER = ORIGINAL_METHODS + EXTRA_METHODS
+METHOD_LABELS = {
+    'baseline1': 'Baseline1',
+    'baseline2': 'Baseline2',
+    'your_method': 'YourMethod',
+    **EXTRA_METHOD_LABELS,
+}
+METHOD_COLORS = {
+    'baseline1': '#7a8799',
+    'baseline2': '#d97757',
+    'your_method': '#2a9d8f',
+    **EXTRA_METHOD_COLORS,
+}
+
+CONTENT_PROFILE_LENGTH = 18
+CONTENT_ACTIVE_WINDOW = 6
+CONTENT_SHIFT_INTERVAL = 12
+SHARED_HOTSPOT_INTERVAL = 9
+CONTENT_SERVICE_DEADLINE_MS = 2350.0
 
 
 def propagation_delay_ms(dist_m):
@@ -130,6 +170,59 @@ def get_nodes(df_sat, df_uav, t_ms):
     if sat_t.empty and uav_t.empty:
         return pd.DataFrame(columns=cols)
     return pd.concat([sat_t[cols], uav_t[cols]], ignore_index=True)
+
+
+def build_flow_content_profiles(flow_pairs):
+    profiles = {}
+    for flow_index, flow in enumerate(flow_pairs):
+        base = (flow_index * 13) % content_cfg.CONTENT_CATALOG_SIZE
+        stride = 7 + (flow_index % 3) * 2
+        profiles[flow] = [
+            int((base + stride * offset) % content_cfg.CONTENT_CATALOG_SIZE)
+            for offset in range(CONTENT_PROFILE_LENGTH)
+        ]
+    return profiles
+
+
+def build_step_content_requests(flow_pairs, flow_profiles, step_i):
+    request_batch = []
+    content_by_flow = {}
+    phase = step_i // CONTENT_SHIFT_INTERVAL
+    shared_hotspot = int((phase * 5) % content_cfg.CONTENT_CATALOG_SIZE)
+
+    for flow_index, flow in enumerate(flow_pairs):
+        profile = flow_profiles[flow]
+        window_start = (phase * 3 + flow_index * 2) % len(profile)
+        active_window = [
+            profile[(window_start + offset) % len(profile)]
+            for offset in range(CONTENT_ACTIVE_WINDOW)
+        ]
+        selector = (step_i * 5 + flow_index * 3 + phase) % len(active_window)
+        content_id = int(active_window[selector])
+
+        if step_i % SHARED_HOTSPOT_INTERVAL == 0:
+            content_id = shared_hotspot
+        elif step_i % 5 == flow_index % 5:
+            content_id = int(active_window[0])
+
+        content_by_flow[flow] = content_id
+        request_batch.append((flow[0], content_id))
+
+    return request_batch, content_by_flow
+
+
+def build_future_content_snapshots(df_sat, df_uav, timestamps, start_idx, horizon, engine):
+    snapshots = []
+    for index in range(start_idx + 1, min(start_idx + horizon + 1, len(timestamps))):
+        nodes_df = get_nodes(df_sat, df_uav, int(timestamps[index]))
+        if nodes_df.empty:
+            continue
+        graph, _, type_map = build_topology_graph(nodes_df)
+        if len(graph.nodes) < 2:
+            continue
+        engine.apply(graph, type_map, index)
+        snapshots.append(build_snapshot_view(graph, type_map))
+    return snapshots
 
 
 def build_topology_graph(nodes_df):
@@ -537,6 +630,7 @@ def run_experiment(sat_dir=SAT_DIR, uav_file=UAV_FILE, max_steps=MAX_STEPS):
         ('baseline2', ReactiveRelayMethod()),
         ('your_method', BalancedRelayMethod()),
     ]
+    extra_states = {method: initial_runtime_state(method) for method in EXTRA_METHODS}
 
     stats = {
         name: {
@@ -551,10 +645,11 @@ def run_experiment(sat_dir=SAT_DIR, uav_file=UAV_FILE, max_steps=MAX_STEPS):
             'step_blocked_rescue': [],
             'step_delay': [],
         }
-        for name, _ in methods
+        for name in METHOD_ORDER
     }
-    shadow_state = {name: {} for name, _ in methods}
-    energy_state = {name: {} for name, _ in methods}
+    shadow_state = {name: {} for name in METHOD_ORDER}
+    energy_state = {name: {} for name in ORIGINAL_METHODS}
+    flow_content_profiles = {}
 
     for step_i, t_ms in enumerate(timestamps):
         if step_i % 50 == 0:
@@ -571,6 +666,34 @@ def run_experiment(sat_dir=SAT_DIR, uav_file=UAV_FILE, max_steps=MAX_STEPS):
         sources = sorted([node_id for node_id, node_type in type_map.items() if node_type == 'UAV'])
         if not sources:
             continue
+
+        if not flow_content_profiles:
+            flow_content_profiles = build_flow_content_profiles([(source, ORIGIN_SERVER) for source in sources])
+
+        content_requests, content_by_flow = build_step_content_requests(
+            [(source, ORIGIN_SERVER) for source in sources],
+            flow_content_profiles,
+            step_i,
+        )
+        current_snapshot = build_snapshot_view(graph, type_map)
+        future_snapshots = [current_snapshot] + build_future_content_snapshots(
+            df_sat,
+            df_uav,
+            timestamps,
+            step_i,
+            content_cfg.LOOKAHEAD_HORIZON,
+            engine,
+        )
+        extra_placements = {}
+        for method in EXTRA_METHODS:
+            placement, _ = solve_method_placement(
+                method,
+                step_i,
+                future_snapshots,
+                extra_states[method],
+                request_batch=content_requests,
+            )
+            extra_placements[method] = placement
 
         for name, method in methods:
             relay_loads = defaultdict(int)
@@ -634,6 +757,79 @@ def run_experiment(sat_dir=SAT_DIR, uav_file=UAV_FILE, max_steps=MAX_STEPS):
             stats[name]['step_delay'].append(float(np.mean(delay_step_values)) if delay_step_values else np.nan)
             update_energy(energy_state[name], type_map, relay_loads)
 
+        for method in EXTRA_METHODS:
+            blocked_step_total = 0
+            blocked_step_success = 0
+            delay_step_values = []
+
+            for source in sources:
+                blocked_now = engine.is_blocked(source, step_i)
+                if blocked_now:
+                    blocked_step_total += 1
+                    stats[method]['blocked_total'] += 1
+                    if source not in shadow_state[method]:
+                        shadow_state[method][source] = {'start': step_i, 'recovered': False}
+
+                result = resolve_request(
+                    method,
+                    graph,
+                    source,
+                    content_by_flow[(source, ORIGIN_SERVER)],
+                    type_map,
+                    extra_placements[method],
+                    extra_states[method],
+                )
+
+                is_timely = (
+                    result['success']
+                    and result['delay_ms'] is not None
+                    and float(result['delay_ms']) <= CONTENT_SERVICE_DEADLINE_MS
+                )
+
+                if is_timely:
+                    delay_ms = float(result['delay_ms'])
+                    stats[method]['ok'] += 1
+                    if blocked_now:
+                        blocked_step_success += 1
+                        stats[method]['blocked_success'] += 1
+                else:
+                    delay_ms = DIRECT_TIMEOUT_PENALTY_MS
+                    stats[method]['fail'] += 1
+
+                path = result['path'] if is_timely else None
+                relay_used = False
+                if path is not None:
+                    for index in range(len(path) - 1):
+                        if graph[path[index]][path[index + 1]].get('kind') == 'UAV_RELAY':
+                            relay_used = True
+                            break
+                if relay_used:
+                    stats[method]['relay_usage'] += 1
+
+                stats[method]['service_delays'].append(delay_ms)
+                delay_step_values.append(delay_ms)
+
+                state = shadow_state[method].get(source)
+                if state is not None and not state['recovered'] and result['success']:
+                    stats[method]['recovery_times'].append(step_i - state['start'])
+                    state['recovered'] = True
+                if not blocked_now and source in shadow_state[method]:
+                    shadow_state[method].pop(source, None)
+
+            if blocked_step_total > 0:
+                stats[method]['step_blocked_rescue'].append(blocked_step_success / blocked_step_total)
+            else:
+                stats[method]['step_blocked_rescue'].append(np.nan)
+            stats[method]['step_delay'].append(float(np.mean(delay_step_values)) if delay_step_values else np.nan)
+
+            advance_runtime_state(
+                method,
+                current_snapshot,
+                content_requests,
+                extra_placements[method],
+                extra_states[method],
+            )
+
     return stats
 
 
@@ -663,12 +859,11 @@ def _annotate_bars(axis, bars, is_percent=False):
 
 
 def plot_results(summary):
-    # Mapping the dictionary keys to your new labels
-    methods = ['baseline1', 'baseline2', 'your_method']
-    labels = ['Base-W', 'Base-M', 'Ours-Full']
-    colors = ['#7a8799', '#d97757', '#2a9d8f']
+    methods = list(METHOD_ORDER)
+    labels = [METHOD_LABELS[method] for method in methods]
+    colors = [METHOD_COLORS[method] for method in methods]
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig, axes = plt.subplots(2, 2, figsize=(18, 10))
     chart_specs = [
         ('success_rate', 'Task Success Rate', True),
         ('avg_service_delay_ms', 'Avg Service Delay (ms)', False),
@@ -679,8 +874,8 @@ def plot_results(summary):
     for axis, (key, title, is_percent) in zip(axes.flat, chart_specs):
         values = [summary[method][key] for method in methods]
         bars = axis.bar(labels, values, color=colors, width=0.62)
-        axis.set_title(title, fontsize=12, fontweight='bold')
-        axis.tick_params(axis='x', rotation=0) # Removed rotation for better readability
+        axis.set_title(title)
+        axis.tick_params(axis='x', rotation=25)
         _annotate_bars(axis, bars, is_percent=is_percent)
 
     fig.suptitle('Experiment 3: UAV Relay Performance Comparison', fontsize=16)
@@ -692,30 +887,118 @@ def plot_results(summary):
 
 
 def plot_timeline(stats):
-    methods = [
-        ('baseline1', 'Base-W', '#7a8799'),
-        ('baseline2', 'Base-M', '#d97757'),
-        ('your_method', 'Ours-Full', '#2a9d8f'),
-    ]
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+    def _smooth_series(values):
+        return pd.Series(values, dtype=float).rolling(window=5, min_periods=1).mean()
 
-    for method, label, color in methods:
-        rescue = pd.Series(stats[method]['step_blocked_rescue']).rolling(window=5, min_periods=1).mean()
-        delay = pd.Series(stats[method]['step_delay']).rolling(window=5, min_periods=1).mean()
-        ax1.plot(rescue, label=label, color=color, linewidth=2)
-        ax2.plot(delay, label=label, color=color, linewidth=2)
+    def _set_dynamic_ylim(axis, series_list, floor_zero=False):
+        finite = []
+        for series in series_list:
+            arr = series.to_numpy(dtype=float)
+            finite.extend(arr[np.isfinite(arr)])
+        if not finite:
+            return
+        low = float(np.min(finite))
+        high = float(np.max(finite))
+        span = high - low
+        if math.isclose(span, 0.0):
+            pad = max(abs(low) * 0.05, 0.05)
+        else:
+            pad = max(span * 0.18, 0.05)
+        lower = low - pad
+        if floor_zero:
+            lower = max(0.0, lower)
+        axis.set_ylim(lower, high + pad)
 
-    ax1.set_ylabel('Rescue Rate')
-    ax1.set_title('Blind-Zone Rescue Capability Over Time (5-step Moving Avg)')
-    ax1.grid(alpha=0.3)
-    ax1.legend()
+    original_rescue = {method: _smooth_series(stats[method]['step_blocked_rescue']) for method in ORIGINAL_METHODS}
+    extra_rescue = {method: _smooth_series(stats[method]['step_blocked_rescue']) for method in EXTRA_METHODS}
+    original_delay = {method: _smooth_series(stats[method]['step_delay']) for method in ORIGINAL_METHODS}
+    extra_delay = {method: _smooth_series(stats[method]['step_delay']) for method in EXTRA_METHODS}
 
-    ax2.set_ylabel('Service Delay (ms)')
-    ax2.set_xlabel('Time Step')
-    ax2.set_title('Service Delay Over Time (5-step Moving Avg)')
-    ax2.grid(alpha=0.3)
+    step_count = max((len(stats[method]['step_delay']) for method in METHOD_ORDER), default=0)
+    step_axis = np.arange(step_count)
 
-    fig.tight_layout()
+    fig, axes = plt.subplots(2, 2, figsize=(15, 9), sharex='col')
+    fig.suptitle(
+        '实验三：按方法族拆分的时序表现\n'
+        '（5步滑动平均）',
+        fontsize=15,
+        fontweight='bold',
+    )
+
+    ax_rescue_orig, ax_rescue_extra = axes[0]
+    ax_delay_orig, ax_delay_extra = axes[1]
+
+    for method in ORIGINAL_METHODS:
+        ax_rescue_orig.plot(
+            step_axis,
+            original_rescue[method],
+            label=METHOD_LABELS[method],
+            color=METHOD_COLORS[method],
+            linewidth=2.2,
+            alpha=0.9,
+        )
+        ax_delay_orig.plot(
+            step_axis,
+            original_delay[method],
+            label=METHOD_LABELS[method],
+            color=METHOD_COLORS[method],
+            linewidth=2.2,
+            alpha=0.9,
+        )
+
+    for method in EXTRA_METHODS:
+        ax_rescue_extra.plot(
+            step_axis,
+            extra_rescue[method],
+            label=METHOD_LABELS[method],
+            color=METHOD_COLORS[method],
+            linewidth=1.9,
+            alpha=0.9,
+        )
+        ax_delay_extra.plot(
+            step_axis,
+            extra_delay[method],
+            label=METHOD_LABELS[method],
+            color=METHOD_COLORS[method],
+            linewidth=1.9,
+            alpha=0.9,
+        )
+
+    ax_rescue_orig.set_title('原始中继方法：盲区救援率')
+    ax_rescue_orig.set_ylabel('救援率')
+    ax_rescue_orig.grid(alpha=0.3)
+    ax_rescue_orig.legend(fontsize=9, ncol=1, loc='lower left')
+    ax_rescue_orig.set_ylim(-0.03, 1.03)
+
+    ax_rescue_extra.set_title('新增内容方法：盲区救援率')
+    ax_rescue_extra.grid(alpha=0.3)
+    ax_rescue_extra.legend(fontsize=8, ncol=2, loc='lower left')
+    ax_rescue_extra.set_ylim(-0.03, 1.03)
+
+    ax_delay_orig.set_title('原始中继方法：业务完成时延')
+    ax_delay_orig.set_xlabel('时间步')
+    ax_delay_orig.set_ylabel('时延 (ms)')
+    ax_delay_orig.grid(alpha=0.3)
+    _set_dynamic_ylim(ax_delay_orig, list(original_delay.values()), floor_zero=True)
+
+    ax_delay_extra.set_title('新增内容方法：业务完成时延')
+    ax_delay_extra.set_xlabel('时间步')
+    ax_delay_extra.grid(alpha=0.3)
+    _set_dynamic_ylim(ax_delay_extra, list(extra_delay.values()), floor_zero=True)
+
+    for axis in (ax_rescue_orig, ax_rescue_extra, ax_delay_orig, ax_delay_extra):
+        axis.axvline(x=BLIND_ZONE_START, color='gray', linestyle='--', alpha=0.5)
+
+    rescue_ylim = ax_rescue_orig.get_ylim()
+    ax_rescue_orig.text(
+        BLIND_ZONE_START + 1,
+        rescue_ylim[1] - (rescue_ylim[1] - rescue_ylim[0]) * 0.12,
+        'Blind Zones Start',
+        fontsize=8,
+        color='gray',
+    )
+
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
     plot_path = os.path.join(SCRIPT_DIR, 'experiment3_timeline.png')
     fig.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
@@ -723,26 +1006,22 @@ def plot_timeline(stats):
 
 
 def print_summary(summary):
-    print('\n' + '=' * 75)
-    print('Experiment 3 Results Summary — UAV Relay Verification')
-    print('=' * 75)
-    print(f"{'Metric':<28}{'Base-W':>12}{'Base-M':>12}{'Ours-Full':>12}")
-    print('-' * 75)
-    rows = [
-        ('Success Rate', 'success_rate', True),
-        ('Avg Delay (ms)', 'avg_service_delay_ms', False),
-        ('Blind-Zone Rescue', 'blind_zone_rescue_rate', True),
-        ('Avg Recovery Steps', 'avg_recovery_steps', False),
-        ('Relay Overload Events', 'overload_events', False),
-    ]
-    # ... (rest of the logic remains the same)
-    for title, key, is_percent in rows:
-        values = [summary[m][key] for m in ['baseline1', 'baseline2', 'your_method']]
-        if is_percent:
-            print(f'{title:<28}{values[0] * 100:>11.1f}%{values[1] * 100:>11.1f}%{values[2] * 100:>11.1f}%')
-        else:
-            print(f'{title:<28}{values[0]:>12.2f}{values[1]:>12.2f}{values[2]:>12.2f}')
-    print('-' * 75)
+    print('\n' + '=' * 96)
+    print('实验三结果汇总 — 无人机中继收益验证')
+    print('=' * 96)
+    print(f"{'方法':<18}{'成功率':>10}{'时延(ms)':>12}{'盲区救援率':>12}{'恢复步数':>12}{'过载次数':>12}")
+    print('-' * 96)
+    for method in METHOD_ORDER:
+        values = summary[method]
+        print(
+            f"{METHOD_LABELS[method]:<18}"
+            f"{values['success_rate'] * 100:>9.1f}%"
+            f"{values['avg_service_delay_ms']:>12.2f}"
+            f"{values['blind_zone_rescue_rate'] * 100:>11.1f}%"
+            f"{values['avg_recovery_steps']:>12.2f}"
+            f"{values['overload_events']:>12d}"
+        )
+    print('-' * 96)
 
     b1 = summary['baseline1']
     ym = summary['your_method']
@@ -751,7 +1030,12 @@ def print_summary(summary):
     print(f"  时延降低:     {(b1['avg_service_delay_ms'] - ym['avg_service_delay_ms']) / max(b1['avg_service_delay_ms'], 1e-6) * 100:.1f}%")
     print(f"  盲区救援率:   +{(ym['blind_zone_rescue_rate'] - b1['blind_zone_rescue_rate']) * 100:.1f}pp")
     print(f"  恢复加速:     {(b1['avg_recovery_steps'] - ym['avg_recovery_steps']) / max(b1['avg_recovery_steps'], 1e-6) * 100:.1f}%")
-    print('=' * 75)
+    if 'otcp' in summary:
+        otcp = summary['otcp']
+        print('OTCP/OLCP vs Baseline1:')
+        print(f"  成功率提升:   +{(otcp['success_rate'] - b1['success_rate']) * 100:.1f}pp")
+        print(f"  盲区救援率:   +{(otcp['blind_zone_rescue_rate'] - b1['blind_zone_rescue_rate']) * 100:.1f}pp")
+    print('=' * 96)
 
 
 def save_metrics(summary):

@@ -1,66 +1,66 @@
 {
   "nocache": {
-    "avg_delay_ms": 4006.1539328061863,
-    "total_traffic_gb": 19.53125,
+    "avg_delay_ms": 4006.153916185871,
+    "total_traffic_gb": 31.25,
     "hit_rate": 0.0,
     "backhaul_rate": 1.0,
     "solve_time_ms": 0.0,
     "avg_diversity": 0
   },
   "lce_lru": {
-    "avg_delay_ms": 2765.145628983313,
-    "total_traffic_gb": 12.48046875,
-    "hit_rate": 0.722,
-    "backhaul_rate": 0.278,
+    "avg_delay_ms": 3575.3532557340372,
+    "total_traffic_gb": 27.333984375,
+    "hit_rate": 0.250625,
+    "backhaul_rate": 0.749375,
     "solve_time_ms": 0.0,
     "avg_diversity": 0
   },
   "greedy": {
-    "avg_delay_ms": 2677.473058309848,
-    "total_traffic_gb": 11.982421875,
-    "hit_rate": 0.773,
-    "backhaul_rate": 0.22699999999999998,
+    "avg_delay_ms": 3337.940209427487,
+    "total_traffic_gb": 25.17578125,
+    "hit_rate": 0.38875,
+    "backhaul_rate": 0.6112500000000001,
     "solve_time_ms": 0.0,
-    "avg_diversity": 18.85
+    "avg_diversity": 7.6
   },
   "madrl": {
-    "avg_delay_ms": 2500.617418391667,
-    "total_traffic_gb": 11.0546875,
-    "hit_rate": 0.876,
-    "backhaul_rate": 0.124,
+    "avg_delay_ms": 3035.242037608173,
+    "total_traffic_gb": 23.1640625,
+    "hit_rate": 0.565,
+    "backhaul_rate": 0.43500000000000005,
     "solve_time_ms": 0.0,
-    "avg_diversity": 83.0
+    "avg_diversity": 56.71
   },
   "submod": {
-    "avg_delay_ms": 2407.634543067487,
-    "total_traffic_gb": 10.52734375,
-    "hit_rate": 0.93,
-    "backhaul_rate": 0.06999999999999995,
-    "solve_time_ms": 158.37979316711426,
-    "avg_diversity": 58.55
+    "avg_delay_ms": 2484.1514708064883,
+    "total_traffic_gb": 18.876953125,
+    "hit_rate": 0.885625,
+    "backhaul_rate": 0.114375,
+    "solve_time_ms": 200.95086097717285,
+    "avg_diversity": 77.3
   },
   "spacecache": {
-    "avg_delay_ms": 2429.982241255249,
-    "total_traffic_gb": 10.60546875,
-    "hit_rate": 0.917,
-    "backhaul_rate": 0.08299999999999996,
-    "solve_time_ms": 156.77809715270996,
-    "avg_diversity": 54.45
+    "avg_delay_ms": 2570.05593097029,
+    "total_traffic_gb": 19.228515625,
+    "hit_rate": 0.835625,
+    "backhaul_rate": 0.16437500000000005,
+    "solve_time_ms": 207.57007598876953,
+    "avg_diversity": 68.95
   },
   "myopic": {
-    "avg_delay_ms": 2371.5467052309223,
-    "total_traffic_gb": 10.302734375,
-    "hit_rate": 0.951,
-    "backhaul_rate": 0.049000000000000044,
-    "solve_time_ms": 1358.0899238586426,
-    "avg_diversity": 83.09
+    "avg_delay_ms": 2473.357669669177,
+    "total_traffic_gb": 18.0859375,
+    "hit_rate": 0.891875,
+    "backhaul_rate": 0.10812500000000003,
+    "solve_time_ms": 2069.4878101348877,
+    "avg_diversity": 80.76
   },
   "olcp": {
-    "avg_delay_ms": 2324.516837291045,
-    "total_traffic_gb": 10.107421875,
-    "hit_rate": 0.965,
-    "backhaul_rate": 0.035,
-    "solve_time_ms": 20094.741582870483,
-    "avg_diversity": 93.21
+    "avg_delay_ms": 2305.8967896041136,
+    "total_traffic_gb": 18.3203125,
+    "hit_rate": 0.989375,
+    "backhaul_rate": 0.010624999999999996,
+    "solve_time_ms": 30073.311805725098,
+    "avg_diversity": 98.84
   }
 }

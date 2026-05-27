@@ -1,0 +1,39 @@
+================================================================
+  Experiment 0: Reality Gap Validation
+================================================================
+>>> Loading traces...
+    Satellites: 118  UAVs: 10  GS: 1  Total steps: 6000
+    LoS threshold: Mode A=disabled, B/C=30.0 deg
+
+  Sampled 50 steps: t0=0ms  t_last=599900ms  span=600s  interval~12.2s
+  Step   1/50
+  Step  10/50
+  Step  20/50
+  Step  30/50
+  Step  40/50
+  Step  50/50
+
+
+============================================================================
+  Reality Gap Validation  (50 steps x 5 UAV->GS_01 flows)
+============================================================================
+  Method                       Avg Delay(ms) Reconstructions     Failures    Links
+----------------------------------------------------------------------------
+  Baseline-A (hop-count)               9.19             55            0      514
+  Baseline-B (delay only)              9.01             55            0      484
+  Ours (full model)                    5.56             76            0      484
+============================================================================
+
+  Conclusion: Mode A ignores link quality => highest experienced delay.
+  Mode B uses propagation delay but is blind to congestion.
+  Mode C (full model) routes around congested links => lowest delay &
+  Mode C proactively adapts routing when congestion shifts (+27% vs B),
+  but each adaptation improves actual quality, narrowing the reality
+  gap: 34% lower experienced delay vs Baseline-B (5.4ms vs 8.1ms).
+============================================================================
+>>> Figure 1: C:\Users\Xcroi\Desktop\Network-Technology-Challenge-project\src\S3\experiment0_results\reality_gap_comparison.png
+>>> Figure 2: C:\Users\Xcroi\Desktop\Network-Technology-Challenge-project\src\S3\experiment0_results\reality_gap_timeline.png
+>>> Figure 3: C:\Users\Xcroi\Desktop\Network-Technology-Challenge-project\src\S3\experiment0_results\reality_gap_reconstructions.png
+>>> Metrics: C:\Users\Xcroi\Desktop\Network-Technology-Challenge-project\src\S3\experiment0_results\metrics.json
+
+>>> Experiment complete.

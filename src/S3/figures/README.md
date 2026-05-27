@@ -1,4 +1,13 @@
 
+## 1. 目录角色说明
+
+`figures/` 现在是项目级统一图表输出目录：
+
+- 直接运行 `algorithms/code/experiment.py` 时，OTCP/cache baseline 图会写到这里
+- 运行 `run_all_project_experiments.py` 时，OTCP/cache baseline 结果也会统一落到这里
+
+也就是说，这个目录不再是 `algorithms/code/` 的局部输出，而是整个 S3 项目主流程的一部分。
+
 ## 2. OTCP 的核心原理
 
 ### 2.1 轨道预测
@@ -60,21 +69,28 @@ LP 解出来后，OTCP 使用 LP-preserving rounding 生成实际缓存放置。
 
 ## 3. 本次在仓库中的修正
 
-为了让 `code.experiment` 能在当前工作区直接运行，我做了两项修正：
+为了让 `code.experiment` 能在当前工作区直接运行，并并入项目主流程，我做了三项修正：
 
 1. 修正 `code/config.py` 中的 `TRACES_DIR`，让它指向当前仓库的 `traces/`
 2. 增加 UAV 轨迹文件兼容逻辑，优先读取：
    - `traces/uav_trace/uav_trace_full.csv`
    - 若不存在，再回退到 `traces/uav_trace_full.csv`
+3. 修正 `code.experiment` 的输出路径，让图表和指标直接写回项目根目录下的 `figures/` 和 `results/`
 
-这样 `code.experiment` 就能直接使用你现在整理后的目录结构运行。
+这样 `code.experiment` 就能直接使用你现在整理后的目录结构运行，也能被 `run_all_project_experiments.py` 统一调度。
 
 ## 4. 本次实际运行命令
 
-在项目根目录执行：
+直接运行 OTCP 主实验时，可以在 `algorithms/` 目录执行：
 
 ```bash
 python -m code.experiment --mode main --sat-dir traces/sat_trace_100 --max-steps 100
+```
+
+如果希望和项目原有实验一起重跑，则在项目根目录执行：
+
+```bash
+python run_all_project_experiments.py --only otcp --otcp-mode main --otcp-max-steps 100
 ```
 
 说明：
@@ -121,7 +137,7 @@ python -m code.experiment --mode main --sat-dir traces/sat_trace_100 --max-steps
 
 ## 6. 已生成的图表
 
-主对比图与附加分析图已经生成在项目根目录下：
+主对比图与附加分析图现在统一生成在项目根目录下：
 
 - `figures/experiment_results.png`：四项主指标对比图
 - `figures/convergence.png`：命中率随时间收敛曲线
@@ -134,9 +150,10 @@ python -m code.experiment --mode main --sat-dir traces/sat_trace_100 --max-steps
 如果目的是展示 OTCP 的效果，建议：
 
 1. 使用 `python -m code.experiment --mode main` 作为主实验入口
-2. 使用 `figures/experiment_results.png` 作为论文/答辩主对比图
-3. 用 `convergence.png` 和 `cache_diversity.png` 作为支撑图
-4. 不再把 OTCP 放进纯最短路路由横评里作为唯一展示口径
+2. 若要与项目原始实验统一调度，使用 `python run_all_project_experiments.py --only otcp`
+3. 使用 `figures/experiment_results.png` 作为论文/答辩主对比图
+4. 用 `convergence.png` 和 `cache_diversity.png` 作为支撑图
+5. 不再把 OTCP 放进纯最短路路由横评里作为唯一展示口径
 
 ## 8. 结论
 
