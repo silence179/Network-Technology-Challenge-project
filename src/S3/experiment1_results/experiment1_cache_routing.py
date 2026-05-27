@@ -403,8 +403,8 @@ def route_baseline2_cache_only(G, requester, cache_nodes, type_map, cache_store,
         return None, None, False, True
 
 
-# ---------- Your Method：内容-拓扑协同路由（真实ICN动态缓存） ----------
-def route_your_method(G, requester, cache_nodes, type_map, cache_store, content_id, gs_node=ORIGIN_SERVER):
+# ---------- Our Method：内容-拓扑协同路由（真实ICN动态缓存） ----------
+def route_our_method(G, requester, cache_nodes, type_map, cache_store, content_id, gs_node=ORIGIN_SERVER):
     """
     综合考虑：
     1. ICN 内容发现：探测所有缓存节点（Content Name Routing），选已命中的最优节点
@@ -490,7 +490,7 @@ def run_experiment():
     results = {
         'baseline1': {'delays': [], 'traffics': [], 'cache_hits': 0, 'backhauls': 0, 'total_reqs': 0},
         'baseline2': {'delays': [], 'traffics': [], 'cache_hits': 0, 'backhauls': 0, 'total_reqs': 0},
-        'your_method': {'delays': [], 'traffics': [], 'cache_hits': 0, 'backhauls': 0, 'total_reqs': 0},
+        'our_method': {'delays': [], 'traffics': [], 'cache_hits': 0, 'backhauls': 0, 'total_reqs': 0},
     }
 
     for step_i, t_ms in enumerate(timestamps):
@@ -533,14 +533,14 @@ def run_experiment():
                 results['baseline2']['backhauls']  += int(bh2)
                 results['baseline2']['total_reqs'] += 1
 
-            # ── Your Method ──
-            d3, tr3, h3, bh3 = route_your_method(G, requester, cache_nodes, type_map, cache_ym, content_id)
+            # ── Our Method ──
+            d3, tr3, h3, bh3 = route_our_method(G, requester, cache_nodes, type_map, cache_ym, content_id)
             if d3 is not None:
-                results['your_method']['delays'].append(d3)
-                results['your_method']['traffics'].append(tr3)
-                results['your_method']['cache_hits'] += int(h3)
-                results['your_method']['backhauls']  += int(bh3)
-                results['your_method']['total_reqs'] += 1
+                results['our_method']['delays'].append(d3)
+                results['our_method']['traffics'].append(tr3)
+                results['our_method']['cache_hits'] += int(h3)
+                results['our_method']['backhauls']  += int(bh3)
+                results['our_method']['total_reqs'] += 1
 
     return results
 
@@ -573,8 +573,8 @@ def compute_metrics(results):
 # 绘图
 # ─────────────────────────────────────────────────────────────────────────────
 def plot_results(metrics):
-    methods   = ['baseline1', 'baseline2', 'your_method']
-    labels    = ['Baseline 1\n(Dijkstra)', 'Baseline 2\n(Cache-Only)', 'Your Method\n(Content-Topo)']
+    methods   = ['baseline1', 'baseline2', 'our_method']
+    labels    = ['Baseline 1\n(Dijkstra)', 'Baseline 2\n(Cache-Only)', 'Our Method\n(Content-Topo)']
     colors    = ['#e74c3c', '#f39c12', '#2ecc71']
     bar_width = 0.5
 
@@ -655,7 +655,7 @@ def print_summary(metrics):
     print("\n" + "="*65)
     print("实验一结果汇总")
     print("="*65)
-    header = f"{'指标':<25} {'Baseline1':>12} {'Baseline2':>12} {'YourMethod':>12}"
+    header = f"{'指标':<25} {'Baseline1':>12} {'Baseline2':>12} {'OurMethod':>12}"
     print(header)
     print("-"*65)
 
@@ -668,7 +668,7 @@ def print_summary(metrics):
     for key, label in keys:
         v1 = metrics['baseline1'][key]
         v2 = metrics['baseline2'][key]
-        v3 = metrics['your_method'][key]
+        v3 = metrics['our_method'][key]
         if 'ratio' in key:
             row = f"{label:<25} {v1:>11.1%} {v2:>11.1%} {v3:>11.1%}"
         elif key == 'total_traffic_gb':
@@ -680,11 +680,11 @@ def print_summary(metrics):
 
     # 计算 Your Method 相对 Baseline1 的改进
     b1_delay   = metrics['baseline1']['avg_completion_time_ms']
-    ym_delay   = metrics['your_method']['avg_completion_time_ms']
+    ym_delay   = metrics['our_method']['avg_completion_time_ms']
     b1_traffic = metrics['baseline1']['total_traffic_gb']
-    ym_traffic = metrics['your_method']['total_traffic_gb']
+    ym_traffic = metrics['our_method']['total_traffic_gb']
     if b1_delay > 0:
-        print(f"\nYour Method vs Baseline1:")
+        print(f"\nOur Method vs Baseline1:")
         print(f"  时延下降: {(b1_delay - ym_delay)/b1_delay*100:.1f}%  "
               f"(目标: 20%–50%)")
         print(f"  流量减少: {(b1_traffic - ym_traffic)/b1_traffic*100:.1f}%  "

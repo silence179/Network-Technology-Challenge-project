@@ -321,7 +321,7 @@ class BaseMethod:
 
 
 class NoRelayMethod(BaseMethod):
-    display_name = 'Baseline1'
+    display_name = 'Base-W'
 
     def route(self, graph, direct_graph, src, dst, step_i, type_map, engine, relay_loads, energy_state):
         path = shortest_path_or_none(direct_graph, src, dst)
@@ -331,7 +331,7 @@ class NoRelayMethod(BaseMethod):
 
 
 class ReactiveRelayMethod(BaseMethod):
-    display_name = 'Baseline2'
+    display_name = 'Base-M'
 
     def __init__(self):
         self.pending = {}
@@ -399,7 +399,7 @@ class ReactiveRelayMethod(BaseMethod):
 
 
 class BalancedRelayMethod(BaseMethod):
-    display_name = 'YourMethod'
+    display_name = 'Ours-Full'
 
     def __init__(self):
         self.preferred = {}
@@ -663,38 +663,39 @@ def _annotate_bars(axis, bars, is_percent=False):
 
 
 def plot_results(summary):
+    # Mapping the dictionary keys to your new labels
     methods = ['baseline1', 'baseline2', 'your_method']
-    labels = ['Baseline1', 'Baseline2', 'YourMethod']
+    labels = ['Base-W', 'Base-M', 'Ours-Full']
     colors = ['#7a8799', '#d97757', '#2a9d8f']
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     chart_specs = [
-        ('success_rate', '任务成功率', True),
-        ('avg_service_delay_ms', '业务完成时延 (ms)', False),
-        ('blind_zone_rescue_rate', '盲区救援率', True),
-        ('avg_recovery_steps', '平均恢复时间 (steps)', False),
+        ('success_rate', 'Task Success Rate', True),
+        ('avg_service_delay_ms', 'Avg Service Delay (ms)', False),
+        ('blind_zone_rescue_rate', 'Blind-Zone Rescue Rate', True),
+        ('avg_recovery_steps', 'Avg Recovery Time (steps)', False),
     ]
 
     for axis, (key, title, is_percent) in zip(axes.flat, chart_specs):
         values = [summary[method][key] for method in methods]
         bars = axis.bar(labels, values, color=colors, width=0.62)
-        axis.set_title(title)
-        axis.tick_params(axis='x', rotation=12)
+        axis.set_title(title, fontsize=12, fontweight='bold')
+        axis.tick_params(axis='x', rotation=0) # Removed rotation for better readability
         _annotate_bars(axis, bars, is_percent=is_percent)
 
-    fig.suptitle('实验三：无人机中继收益对比', fontsize=16)
+    fig.suptitle('Experiment 3: UAV Relay Performance Comparison', fontsize=16)
     fig.tight_layout(rect=[0, 0.02, 1, 0.96])
     plot_path = os.path.join(SCRIPT_DIR, 'experiment3_comparison.png')
     fig.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
-    print(f'>>> 图表已保存: {plot_path}')
+    print(f'>>> Chart saved: {plot_path}')
 
 
 def plot_timeline(stats):
     methods = [
-        ('baseline1', 'Baseline1', '#7a8799'),
-        ('baseline2', 'Baseline2', '#d97757'),
-        ('your_method', 'YourMethod', '#2a9d8f'),
+        ('baseline1', 'Base-W', '#7a8799'),
+        ('baseline2', 'Base-M', '#d97757'),
+        ('your_method', 'Ours-Full', '#2a9d8f'),
     ]
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
 
@@ -704,36 +705,37 @@ def plot_timeline(stats):
         ax1.plot(rescue, label=label, color=color, linewidth=2)
         ax2.plot(delay, label=label, color=color, linewidth=2)
 
-    ax1.set_ylabel('盲区救援率')
-    ax1.set_title('随时间变化的盲区业务救援能力（5步滑动平均）')
+    ax1.set_ylabel('Rescue Rate')
+    ax1.set_title('Blind-Zone Rescue Capability Over Time (5-step Moving Avg)')
     ax1.grid(alpha=0.3)
     ax1.legend()
 
-    ax2.set_ylabel('业务时延 (ms)')
-    ax2.set_xlabel('时间步')
-    ax2.set_title('随时间变化的业务完成时延（5步滑动平均）')
+    ax2.set_ylabel('Service Delay (ms)')
+    ax2.set_xlabel('Time Step')
+    ax2.set_title('Service Delay Over Time (5-step Moving Avg)')
     ax2.grid(alpha=0.3)
 
     fig.tight_layout()
     plot_path = os.path.join(SCRIPT_DIR, 'experiment3_timeline.png')
     fig.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
-    print(f'>>> 时序图已保存: {plot_path}')
+    print(f'>>> Timeline chart saved: {plot_path}')
 
 
 def print_summary(summary):
     print('\n' + '=' * 75)
-    print('实验三结果汇总 — 无人机中继收益验证')
+    print('Experiment 3 Results Summary — UAV Relay Verification')
     print('=' * 75)
-    print(f"{'指标':<28}{'Baseline1':>12}{'Baseline2':>12}{'YourMethod':>12}")
+    print(f"{'Metric':<28}{'Base-W':>12}{'Base-M':>12}{'Ours-Full':>12}")
     print('-' * 75)
     rows = [
-        ('任务成功率', 'success_rate', True),
-        ('业务完成时延 (ms)', 'avg_service_delay_ms', False),
-        ('盲区救援率', 'blind_zone_rescue_rate', True),
-        ('平均恢复时间 (steps)', 'avg_recovery_steps', False),
-        ('中继过载次数', 'overload_events', False),
+        ('Success Rate', 'success_rate', True),
+        ('Avg Delay (ms)', 'avg_service_delay_ms', False),
+        ('Blind-Zone Rescue', 'blind_zone_rescue_rate', True),
+        ('Avg Recovery Steps', 'avg_recovery_steps', False),
+        ('Relay Overload Events', 'overload_events', False),
     ]
+    # ... (rest of the logic remains the same)
     for title, key, is_percent in rows:
         values = [summary[m][key] for m in ['baseline1', 'baseline2', 'your_method']]
         if is_percent:

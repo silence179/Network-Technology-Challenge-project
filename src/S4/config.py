@@ -1,7 +1,10 @@
-MODE = "soft" # 模式选择，“soft”为mode b，其他是mode a, mode a为开发半成品，不推荐使用
+# 模式选择："soft" 为 mode_b，其他为 mode_a
+MODE = "soft"
 
-csv_dir = "../S3/outputs/output_25/links" # csv文件夹路径，存储网络拓扑信息
-rules_dir = "../S3/outputs/output_25/rules" # json文件夹路径，存储路由规则
+# CSV 文件夹路径，存储网络拓扑信息
+csv_dir = "../S3/outputs/output_25/links"
+# JSON 文件夹路径，存储路由规则
+rules_dir = "../S3/outputs/output_25/rules"
 
 sat_dir = "../S3/traces/sat_trace_25"
 uav_csv = "../S3/traces/uav_trace_full.csv"
@@ -9,17 +12,17 @@ uav_csv = "../S3/traces/uav_trace_full.csv"
 
 from enum import Enum
 class action(Enum):
-    NOP = 1
-    ADD = 2
-    DEL = 3
-    REPLACE = 4
+    NOP = 1       # 空操作
+    ADD = 2       # 添加
+    DEL = 3       # 删除
+    REPLACE = 4   # 替换
 
 
 import logging
 import os
 class LogColor:
     """
-    根据不同的日志级别，打印不同颜色的日志，并将日志写入不同的文件
+    根据不同的日志级别，打印不同颜色的日志，并将日志写入不同的文件。
     info：绿色
     warning：黄色
     error：红色
@@ -54,25 +57,25 @@ class LogColor:
 
     @staticmethod
     def info(message: str):
-        # info级别的日志，绿色
+        """输出 info 级别日志（绿色）"""
         LogColor.info_logger.info(message)
         print("\033[0;32m" + message + "\033[0m")
 
     @staticmethod
     def warning(message: str):
-        # warning级别的日志，黄色
+        """输出 warning 级别日志（黄色）"""
         LogColor.warning_logger.warning(message)
         print("\033[0;33m" + message + "\033[0m")
 
     @staticmethod
     def error(message: str):
-        # error级别的日志，红色
+        """输出 error 级别日志（红色）"""
         formatted_message = "-" * 120 + '\n| ' + message + "\n" + "└" + "-" * 150
         LogColor.error_logger.error(formatted_message)
         print("\033[0;31m" + formatted_message + "\033[0m")
 
     @staticmethod
     def debug(message: str):
-        # debug级别的日志，灰色
+        """输出 debug 级别日志（灰色）"""
         LogColor.debug_logger.debug(message)
         print("\033[0;37m" + message + "\033[0m")

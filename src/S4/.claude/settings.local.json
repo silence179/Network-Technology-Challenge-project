@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd.exe *)",
+      "Bash(python *)",
+      "Bash(pip install *)",
+      "Bash(mkdir -p \"D:\\\\code\\\\star\\\\main\\\\Network-Technology-Challenge-project\\\\.claude\\\\skills\")",
+      "Bash(cp \"D:\\\\code\\\\claude\\\\word.md\" \"D:\\\\code\\\\star\\\\main\\\\Network-Technology-Challenge-project\\\\.claude\\\\skills\\\\word.md\")",
+      "WebSearch",
+      "Bash(mkdir -p __TRACKED_VAR__/.claude/skills)",
+      "Bash(cp 'D:\\\\code\\\\claude\\\\word.md' __TRACKED_VAR__/.claude/skills/word.md)",
+      "Bash(pip list *)",
+      "Bash(netstat -ano)",
+      "Bash(curl *)"
+    ]
+  }
+}

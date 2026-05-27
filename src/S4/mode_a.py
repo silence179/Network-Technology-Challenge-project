@@ -1,4 +1,5 @@
 import csv
+import random
 import networkx as nx
 import os
 from mininet.net import Mininet
@@ -8,17 +9,37 @@ from config import action, LogColor
 
 class Engine:
     def __init__(self):
+        self.req_id = 1
         self.content = dict()
         self.hosts = dict()
         self.switches = dict()
         self.rules = dict()
+        self.ip = dict()
         self.G = nx.DiGraph()   # 用于计算最短路
         self.net = Mininet(switch=OVSSwitch)
         self.net.start()
     
     def StopNet(self):
+        """停止 Mininet 网络"""
         self.net.stop()
-    
+
+    def Get_ip(self, csv_path) -> None:
+        """从 CSV 文件中读取 node_id 到 IP 地址的映射"""
+        if not os.path.exists(csv_path):
+            LogColor.error(f"Get_ip: 文件 {csv_path} 不存在")
+            return
+
+        with open(csv_path, mode='r', encoding='utf-8', newline='') as f:
+            reader = csv.DictReader(f)
+            if not {'node_id', 'ip'}.issubset(reader.fieldnames or []):
+                LogColor.error(f"Get_ip: CSV 缺少必要列 node_id / ip")
+                return
+
+            for row in reader:
+                node_id = row['node_id'].strip()
+                ip_addr = row['ip'].strip()
+                self.ip[node_id] = ip_addr
+
     def __ensure_host(self, node):
         if node in self.hosts.keys():
             return self.net.get(node)
@@ -34,11 +55,9 @@ class Engine:
         s.start([])
     
     def addLink(self, link):
-        # 先在mininet中加入链路
+        """添加一条链路到 Mininet 和内部拓扑图中"""
         n1 : str = link['src']
         n2 : str = link['dst']
-        # LogColor.debug(f'src: {n1}')
-        # LogColor.debug(f'dst: {n2}')
         # 处理节点可能不存在的问题
         for n in (n1, n2):
             if n.startswith('GS'):
@@ -54,7 +73,7 @@ class Engine:
             else:
                 intf_name2 = intf_name
                 
-        # 处理链路可能不存在的问题
+        # 处理链路可能已存在的情况
         links = self.net.linksBetween(n1, n2)
         LogColor.info(f'links between {n1} and {n2} : {links}')
         if not links:
@@ -90,7 +109,7 @@ class Engine:
                 dst_intf = lk.intf2.name
                 self.net.get(n2).cmd(f'tc qdisc add dev {dst_intf} root netem loss 100%')
         
-        # 再在模拟链路中加
+        # 在内部拓扑图中添加边
         edge_attr = {k : v for k, v in link.items() if k != 'direction' and k != 'src' and k != 'dst'}
         self.G.add_node(link['src'])
         self.G.add_node(link['dst'])
@@ -104,10 +123,12 @@ class Engine:
             raise RuntimeError('wrong direction type')
 
     def PrintGraph(self):
+        """打印当前拓扑图中的所有边"""
         for u, v, data in self.G.edges(data=True):
             LogColor.info(f'{u} -> {v} {data}')
 
     def UpdateRule(self, rule, meta):
+        """更新路由规则"""
         self.version = meta['version']
 
         if rule['action'] == action.REPLACE and rule['node'] not in self.rules.keys():
@@ -125,54 +146,101 @@ class Engine:
                 self.rules.pop(rule['node'])
         
     def AddContent(self, target, filename, **fileinfo):
+        """添加内容到指定节点"""
         if target in self.content.keys():
             self.content[target][filename] = fileinfo 
         else:
             self.content[target] = {filename : fileinfo }
     
     def DeleteContent(self, target, filename):
+        """从指定节点删除内容"""
         if target in self.content.keys():
             self.content[target].pop(filename)
 
     def UpdateContent(self, target, filename, **fileinfo):
+        """更新指定节点的内容"""
         self.AddContent(target, filename, **fileinfo)
 
     def GetContent(self, target, filename):
+        """获取指定节点的内容信息"""
         if target in self.content.keys() and (filename in self.content[target].keys()):
             return self.content[target][filename]
         return None
 
 
+    def compute_path_metrics(self, path):
+        """计算路径的总延迟和瓶颈带宽"""
+        total_delay = 0.0
+        min_bw = float('inf')
+
+        for u, v in zip(path[:-1], path[1:]):
+            data = self.G[u][v]
+            delay_ms = float(data['delay_ms'])
+            jitter_ms = float(data.get('jitter_ms', 0.0))
+            bw_mbps = float(data['bw_mbps'])
+
+            total_delay += random.uniform(delay_ms - jitter_ms, delay_ms + jitter_ms)
+            min_bw = min(min_bw, bw_mbps)
+
+        return total_delay, min_bw
+
     def ExecuteReq(self, client, content_id, time, log_path):
+        """执行一次内容请求：查找内容位置、计算最短路径、模拟下载"""
         if client not in self.rules.keys():
             raise RuntimeError('invalid request: no such client')
-        
-        target = self.rules[client]['next_hop']
-        algo = self.rules[client]['algo']
-        cache_status = 'HIT'
-        http_code = 200
 
-        if (target in self.content.keys()) and (content_id in self.content[target].keys()):
-            def edge_cost(u, v, data):
-                if data['status'] != 'UP':
-                    return float('inf')
-                return data['delay_ms']
-            
-            path = nx.shortest_path(
-                self.G,
-                source=client,
-                target=target,
-                weight=edge_cost
-            )
+        # 遍历所有 content，找出持有该内容的服务器节点
+        target_node = None
+        for node, files in self.content.items():
+            if content_id in files:
+                target_node = node
+                break
 
-            content_info = self.content[target][content_id]
-            file_size_MB = content_info['filesize']
-            
-            # TODO 利用mininet计算真实的延迟与下载速度
-            tmp = dict()
-            self.WriteLog(tmp, log_path)
-        else:
+        if not target_node:
             raise RuntimeError('invalid request: no such content')
+
+        algo = self.rules[client].get('algo', 'Unknown')
+
+        def edge_cost(u, v, data):
+            if data.get('status', 'UP') != 'UP':
+                return float('inf')
+            return float(data['delay_ms'])
+
+        path = nx.shortest_path(
+            self.G,
+            source=client,
+            target=target_node,
+            weight=edge_cost
+        )
+
+        content_info = self.content[target_node][content_id]
+        file_size_MB = content_info['filesize']
+
+        total_delay, min_bw = self.compute_path_metrics(path)
+
+        if min_bw <= 0:
+            min_bw = 0.001
+
+        download_time = file_size_MB * 8 / min_bw * 1000 + total_delay * 2
+
+        tmp = dict()
+        tmp['time_ms'] = time
+        tmp['req_id'] = self.req_id
+        self.req_id += 1
+        tmp['node_id'] = client
+        tmp['content_id'] = content_id
+        tmp['file_size_MB'] = file_size_MB
+        tmp['algo'] = algo
+        tmp['path'] = path
+        tmp['server_node'] = target_node
+        tmp['latency_ms'] = total_delay * 2
+        tmp['throughput_mbps'] = min_bw
+        tmp['http_code'] = 200
+        tmp['cache_status'] = 'HIT'
+        tmp['download_time'] = download_time
+
+        self.WriteLog(tmp, log_path)
+        LogColor.info(f"[{time}ms] Success: {client} -> {target_node} | Path: {path} | DL Time: {download_time:.2f}ms")
 
 
     def WriteLog(self, row, csv_path):
