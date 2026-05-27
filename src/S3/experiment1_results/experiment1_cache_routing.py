@@ -436,8 +436,8 @@ def route_baseline2_cache_only(G, requester, cache_nodes, type_map, cache_store,
         return None, None, False, True
 
 
-# ---------- Our Method：内容-拓扑协同路由（真实ICN动态缓存） ----------
-def route_our_method(G, requester, cache_nodes, type_map, cache_store, content_id, gs_node=ORIGIN_SERVER):
+# ---------- Your Method：内容-拓扑协同路由（真实ICN动态缓存） ----------
+def route_your_method(G, requester, cache_nodes, type_map, cache_store, content_id, gs_node=ORIGIN_SERVER):
     """
     综合考虑：
     1. ICN 内容发现：探测所有缓存节点（Content Name Routing），选已命中的最优节点
@@ -537,9 +537,6 @@ def run_experiment():
     results = {
         method: {'delays': [], 'traffics': [], 'cache_hits': 0, 'backhauls': 0, 'total_reqs': 0}
         for method in METHOD_ORDER
-        'baseline1': {'delays': [], 'traffics': [], 'cache_hits': 0, 'backhauls': 0, 'total_reqs': 0},
-        'baseline2': {'delays': [], 'traffics': [], 'cache_hits': 0, 'backhauls': 0, 'total_reqs': 0},
-        'our_method': {'delays': [], 'traffics': [], 'cache_hits': 0, 'backhauls': 0, 'total_reqs': 0},
     }
 
     for step_i, t_ms in enumerate(timestamps):
@@ -604,41 +601,14 @@ def run_experiment():
                 results['baseline2']['backhauls']  += int(bh2)
                 results['baseline2']['total_reqs'] += 1
 
-            # ── Our Method ──
-            d3, tr3, h3, bh3 = route_our_method(G, requester, cache_nodes, type_map, cache_ym, content_id)
+            # ── Your Method ──
+            d3, tr3, h3, bh3 = route_your_method(G, requester, cache_nodes, type_map, cache_ym, content_id)
             if d3 is not None:
-                results['our_method']['delays'].append(d3)
-                results['our_method']['traffics'].append(tr3)
-                results['our_method']['cache_hits'] += int(h3)
-                results['our_method']['backhauls']  += int(bh3)
-                results['our_method']['total_reqs'] += 1
-
-            for method in EXTRA_METHODS:
-                response = resolve_request(
-                    method,
-                    G,
-                    requester,
-                    content_id,
-                    type_map,
-                    extra_placements[method],
-                    extra_states[method],
-                )
-                if not response['success']:
-                    continue
-                results[method]['delays'].append(response['delay_ms'])
-                results[method]['traffics'].append(response['traffic_mb'])
-                results[method]['cache_hits'] += int(response['hit'])
-                results[method]['backhauls'] += int(not response['hit'])
-                results[method]['total_reqs'] += 1
-
-        for method in EXTRA_METHODS:
-            advance_runtime_state(
-                method,
-                current_snapshot,
-                requests,
-                extra_placements[method],
-                extra_states[method],
-            )
+                results['your_method']['delays'].append(d3)
+                results['your_method']['traffics'].append(tr3)
+                results['your_method']['cache_hits'] += int(h3)
+                results['your_method']['backhauls']  += int(bh3)
+                results['your_method']['total_reqs'] += 1
 
             for method in EXTRA_METHODS:
                 response = resolve_request(
@@ -802,11 +772,11 @@ def print_summary(metrics):
 
     # 计算 Your Method 相对 Baseline1 的改进
     b1_delay   = metrics['baseline1']['avg_completion_time_ms']
-    ym_delay   = metrics['our_method']['avg_completion_time_ms']
+    ym_delay   = metrics['your_method']['avg_completion_time_ms']
     b1_traffic = metrics['baseline1']['total_traffic_gb']
-    ym_traffic = metrics['our_method']['total_traffic_gb']
+    ym_traffic = metrics['your_method']['total_traffic_gb']
     if b1_delay > 0:
-        print(f"\nOur Method vs Baseline1:")
+        print(f"\nYour Method vs Baseline1:")
         print(f"  时延下降: {(b1_delay - ym_delay)/b1_delay*100:.1f}%  "
               f"(目标: 20%–50%)")
         print(f"  流量减少: {(b1_traffic - ym_traffic)/b1_traffic*100:.1f}%  "
