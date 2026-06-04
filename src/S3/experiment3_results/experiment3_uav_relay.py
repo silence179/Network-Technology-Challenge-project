@@ -414,7 +414,7 @@ class BaseMethod:
 
 
 class NoRelayMethod(BaseMethod):
-    display_name = 'Base-W'
+    display_name = 'Baseline1'
 
     def route(self, graph, direct_graph, src, dst, step_i, type_map, engine, relay_loads, energy_state):
         path = shortest_path_or_none(direct_graph, src, dst)
@@ -424,7 +424,7 @@ class NoRelayMethod(BaseMethod):
 
 
 class ReactiveRelayMethod(BaseMethod):
-    display_name = 'Base-M'
+    display_name = 'Baseline2'
 
     def __init__(self):
         self.pending = {}
@@ -492,7 +492,7 @@ class ReactiveRelayMethod(BaseMethod):
 
 
 class BalancedRelayMethod(BaseMethod):
-    display_name = 'Ours-Full'
+    display_name = 'YourMethod'
 
     def __init__(self):
         self.preferred = {}
@@ -865,10 +865,10 @@ def plot_results(summary):
 
     fig, axes = plt.subplots(2, 2, figsize=(18, 10))
     chart_specs = [
-        ('success_rate', 'Task Success Rate', True),
-        ('avg_service_delay_ms', 'Avg Service Delay (ms)', False),
-        ('blind_zone_rescue_rate', 'Blind-Zone Rescue Rate', True),
-        ('avg_recovery_steps', 'Avg Recovery Time (steps)', False),
+        ('success_rate', '任务成功率', True),
+        ('avg_service_delay_ms', '业务完成时延 (ms)', False),
+        ('blind_zone_rescue_rate', '盲区救援率', True),
+        ('avg_recovery_steps', '平均恢复时间 (steps)', False),
     ]
 
     for axis, (key, title, is_percent) in zip(axes.flat, chart_specs):
@@ -878,12 +878,12 @@ def plot_results(summary):
         axis.tick_params(axis='x', rotation=25)
         _annotate_bars(axis, bars, is_percent=is_percent)
 
-    fig.suptitle('Experiment 3: UAV Relay Performance Comparison', fontsize=16)
+    fig.suptitle('实验三：无人机中继收益对比', fontsize=16)
     fig.tight_layout(rect=[0, 0.02, 1, 0.96])
     plot_path = os.path.join(SCRIPT_DIR, 'experiment3_comparison.png')
     fig.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
-    print(f'>>> Chart saved: {plot_path}')
+    print(f'>>> 图表已保存: {plot_path}')
 
 
 def plot_timeline(stats):
@@ -1002,7 +1002,7 @@ def plot_timeline(stats):
     plot_path = os.path.join(SCRIPT_DIR, 'experiment3_timeline.png')
     fig.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
-    print(f'>>> Timeline chart saved: {plot_path}')
+    print(f'>>> 时序图已保存: {plot_path}')
 
 
 def print_summary(summary):

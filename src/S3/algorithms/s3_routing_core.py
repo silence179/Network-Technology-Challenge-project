@@ -69,6 +69,12 @@ FLOWS = {
     },
 }
 
+TRAFFIC_MODEL_LEGACY = "legacy"
+TRAFFIC_MODEL_PERIODIC_PHOTO = "photo"
+DEFAULT_PHOTO_INTERVAL_S = 10.0
+DEFAULT_PHOTO_SIZE_MB = 12.0
+DEFAULT_PHOTO_PRIORITY = "NORMAL"
+
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -200,7 +206,7 @@ class SimulationStats:
 
 
 def load_and_merge_traces(sat_dir="traces/sat_trace", uav_file="traces/uav_trace_full.csv"):
-    def resolve_uav_file(path):
+    def resolve_uav_source(path):
         candidates = [path]
         basename = os.path.basename(path)
         parent_dir = os.path.dirname(path)
@@ -212,15 +218,20 @@ def load_and_merge_traces(sat_dir="traces/sat_trace", uav_file="traces/uav_trace
                 candidates.append(candidate)
 
         for candidate in candidates:
-            if candidate and os.path.exists(candidate):
+            if candidate and (os.path.exists(candidate) or os.path.isdir(candidate)):
                 return candidate
         return path
 
     sat_files = sorted(glob.glob(os.path.join(sat_dir, "*.csv")))
     sat_frames = [pd.read_csv(file_path) for file_path in sat_files]
     df_sat = pd.concat(sat_frames, ignore_index=True) if sat_frames else pd.DataFrame()
-    resolved_uav_file = resolve_uav_file(uav_file)
-    df_uav = pd.read_csv(resolved_uav_file) if os.path.exists(resolved_uav_file) else pd.DataFrame()
+    resolved_uav_source = resolve_uav_source(uav_file)
+    if os.path.isdir(resolved_uav_source):
+        uav_files = sorted(glob.glob(os.path.join(resolved_uav_source, "*.csv")))
+        uav_frames = [pd.read_csv(file_path) for file_path in uav_files]
+        df_uav = pd.concat(uav_frames, ignore_index=True) if uav_frames else pd.DataFrame()
+    else:
+        df_uav = pd.read_csv(resolved_uav_source) if os.path.exists(resolved_uav_source) else pd.DataFrame()
     timelines = sorted(df_uav["time_ms"].unique()) if not df_uav.empty else []
     return df_sat, df_uav, timelines
 
@@ -396,10 +407,31 @@ def build_node_ip_map(df_sat, df_uav):
     return node_ip_map
 
 
-def build_flow_requests(active_nodes):
+def build_periodic_photo_flow_config(uav_id, photo_size_mb, photo_interval_s):
+    req_bw_mbps = round((photo_size_mb * 8.0) / max(photo_interval_s, 0.1), 3)
+    return {
+        "src": uav_id,
+        "priority": DEFAULT_PHOTO_PRIORITY,
+        "base_bw_mbps": req_bw_mbps,
+        "dst_cidr": "0.0.0.0/0",
+        "traffic_type": "periodic_photo",
+        "photo_size_mb": float(photo_size_mb),
+        "photo_interval_s": float(photo_interval_s),
+        "flow_period_ms": int(round(photo_interval_s * 1000.0)),
+    }
+
+
+def build_flow_requests(
+    active_nodes,
+    current_time_ms,
+    traffic_model=TRAFFIC_MODEL_LEGACY,
+    photo_interval_s=DEFAULT_PHOTO_INTERVAL_S,
+    photo_size_mb=DEFAULT_PHOTO_SIZE_MB,
+    include_ctrl_flow=True,
+):
     requests = []
     active_node_set = set(active_nodes)
-    if FLOWS["CTRL_FLOW"]["src"] in active_node_set:
+    if include_ctrl_flow and FLOWS["CTRL_FLOW"]["src"] in active_node_set:
         active_uavs = sorted(node_id for node_id in active_node_set if node_id.startswith("UAV_"))
         for target_uav in active_uavs:
             requests.append(
@@ -410,6 +442,24 @@ def build_flow_requests(active_nodes):
                     "config": FLOWS["CTRL_FLOW"],
                 }
             )
+
+    if traffic_model == TRAFFIC_MODEL_PERIODIC_PHOTO:
+        interval_ms = max(1, int(round(photo_interval_s * 1000.0)))
+        if current_time_ms % interval_ms != 0:
+            return requests
+
+        if "GS_01" in active_node_set:
+            active_uavs = sorted(node_id for node_id in active_node_set if node_id.startswith("UAV_"))
+            for source_uav in active_uavs:
+                requests.append(
+                    {
+                        "flow_name": f"PHOTO_FLOW_{source_uav}",
+                        "src": source_uav,
+                        "dst": "GS_01",
+                        "config": build_periodic_photo_flow_config(source_uav, photo_size_mb, photo_interval_s),
+                    }
+                )
+        return requests
 
     if "GS_01" in active_node_set:
         for flow_name, flow_config in FLOWS.items():
@@ -517,6 +567,9 @@ def make_rule(flow_request, plan, time_ms, node_ip_map):
         "next_hop_ip": node_ip_map.get(next_hop, "0.0.0.0"),
         "algo": plan.algo,
         "req_bw_mbps": get_current_bandwidth(flow_name, flow_config, time_ms),
+        "traffic_type": flow_config.get("traffic_type", "continuous"),
+        "photo_size_mb": flow_config.get("photo_size_mb"),
+        "photo_interval_s": flow_config.get("photo_interval_s"),
         "debug_info": plan.notes,
     }
 
@@ -1077,6 +1130,14 @@ def get_satellite_scale_label(sat_dir):
     return sat_name
 
 
+def sanitize_output_tag(output_tag):
+    if not output_tag:
+        return None
+    sanitized = output_tag.strip().replace(" ", "_")
+    sanitized = sanitized.replace("/", "_").replace("\\", "_")
+    return sanitized or None
+
+
 def run_simulation(
     router_name,
     sat_dir="traces/sat_trace",
@@ -1084,6 +1145,10 @@ def run_simulation(
     save_outputs=True,
     max_steps=None,
     output_tag=None,
+    traffic_model=TRAFFIC_MODEL_LEGACY,
+    photo_interval_s=DEFAULT_PHOTO_INTERVAL_S,
+    photo_size_mb=DEFAULT_PHOTO_SIZE_MB,
+    include_ctrl_flow=True,
 ):
     router = create_router(router_name)
     start_time = time.perf_counter()
@@ -1099,7 +1164,9 @@ def run_simulation(
 
     node_ip_map = build_node_ip_map(df_sat, df_uav)
     scale_label = get_satellite_scale_label(sat_dir)
-    output_root = os.path.join("outputs", f"output_{scale_label}")
+    resolved_output_tag = sanitize_output_tag(output_tag)
+    output_suffix = resolved_output_tag or scale_label
+    output_root = os.path.join("outputs", f"output_{output_suffix}")
     output_link_dir = os.path.join(output_root, "links")
     output_rule_dir = os.path.join(output_root, "rules")
     if save_outputs:
@@ -1117,7 +1184,14 @@ def run_simulation(
     for step_index, timestamp in enumerate(timelines):
         time_ms = int(timestamp)
         nodes_df = get_nodes_at_timestamp(df_sat, df_uav, time_ms)
-        flow_requests = build_flow_requests(nodes_df["node_id"].values if not nodes_df.empty else [])
+        flow_requests = build_flow_requests(
+            nodes_df["node_id"].values if not nodes_df.empty else [],
+            time_ms,
+            traffic_model=traffic_model,
+            photo_interval_s=photo_interval_s,
+            photo_size_mb=photo_size_mb,
+            include_ctrl_flow=include_ctrl_flow,
+        )
 
         topology_changed = False
         reused_topology = False
@@ -1186,6 +1260,12 @@ def run_simulation(
 
     runtime_seconds = time.perf_counter() - start_time
     metrics = stats.to_dict(runtime_seconds, sat_dir, max_steps)
+    metrics["UAV Trace"] = uav_file
+    metrics["Traffic Model"] = traffic_model
+    metrics["Photo Interval (s)"] = round(float(photo_interval_s), 3)
+    metrics["Photo Size (MB)"] = round(float(photo_size_mb), 3)
+    metrics["Include CTRL Flow"] = bool(include_ctrl_flow)
+    metrics["Output Root"] = output_root
 
     if save_outputs:
         metrics_path = os.path.join(output_root, "metrics.json")
@@ -1202,6 +1282,10 @@ def run_cli(router_name):
     parser.add_argument("--no-save", action="store_true")
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--output-tag", default=None)
+    parser.add_argument("--traffic-model", choices=[TRAFFIC_MODEL_LEGACY, TRAFFIC_MODEL_PERIODIC_PHOTO], default=TRAFFIC_MODEL_LEGACY)
+    parser.add_argument("--photo-interval-s", type=float, default=DEFAULT_PHOTO_INTERVAL_S)
+    parser.add_argument("--photo-size-mb", type=float, default=DEFAULT_PHOTO_SIZE_MB)
+    parser.add_argument("--no-ctrl-flow", action="store_true")
     args = parser.parse_args()
 
     metrics = run_simulation(
@@ -1211,5 +1295,9 @@ def run_cli(router_name):
         save_outputs=not args.no_save,
         max_steps=args.max_steps,
         output_tag=args.output_tag,
+        traffic_model=args.traffic_model,
+        photo_interval_s=args.photo_interval_s,
+        photo_size_mb=args.photo_size_mb,
+        include_ctrl_flow=not args.no_ctrl_flow,
     )
     print(json.dumps(metrics, ensure_ascii=False, indent=2))
