@@ -19,7 +19,17 @@ ALGORITHMS = [
 ]
 
 
-def run_benchmark(sat_dir, uav_file, max_steps, save_outputs, output_dir):
+def run_benchmark(
+    sat_dir,
+    uav_file,
+    max_steps,
+    save_outputs,
+    output_dir,
+    traffic_model,
+    photo_interval_s,
+    photo_size_mb,
+    include_ctrl_flow,
+):
     os.makedirs(output_dir, exist_ok=True)
     metrics_list = []
 
@@ -31,6 +41,10 @@ def run_benchmark(sat_dir, uav_file, max_steps, save_outputs, output_dir):
             uav_file=uav_file,
             save_outputs=save_outputs,
             max_steps=max_steps,
+            traffic_model=traffic_model,
+            photo_interval_s=photo_interval_s,
+            photo_size_mb=photo_size_mb,
+            include_ctrl_flow=include_ctrl_flow,
         )
         metrics_list.append(metrics)
 
@@ -87,6 +101,10 @@ def main():
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--save-outputs", action="store_true")
     parser.add_argument("--output-dir", default="outputs/benchmark_results")
+    parser.add_argument("--traffic-model", choices=["legacy", "photo"], default="legacy")
+    parser.add_argument("--photo-interval-s", type=float, default=10.0)
+    parser.add_argument("--photo-size-mb", type=float, default=12.0)
+    parser.add_argument("--no-ctrl-flow", action="store_true")
     args = parser.parse_args()
 
     dataframe, csv_path, json_path, plot_path = run_benchmark(
@@ -95,6 +113,10 @@ def main():
         max_steps=args.max_steps,
         save_outputs=args.save_outputs,
         output_dir=args.output_dir,
+        traffic_model=args.traffic_model,
+        photo_interval_s=args.photo_interval_s,
+        photo_size_mb=args.photo_size_mb,
+        include_ctrl_flow=not args.no_ctrl_flow,
     )
 
     print("\n=== Benchmark Summary ===")

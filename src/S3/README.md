@@ -89,6 +89,27 @@ python algorithms/benchmark_algorithms.py
 python algorithms/benchmark_algorithms.py traces/sat_trace_100 --max-steps 300 --save-outputs
 ```
 
+### 3.1) 40 星 / 50 UAV / 每 10 秒照片上报场景
+
+如果要运行你新增的 `sat_trace_40` + `uav_trace_50` 场景，并把每架 UAV 建模成“每 10 秒向 `GS_01` 发送一张 12 MB 照片”，可以直接使用：
+
+```bash
+python algorithms/s3_optimized.py traces/sat_trace_40 --uav-file traces/uav_trace_50 --traffic-model photo --photo-interval-s 10 --photo-size-mb 12 --no-ctrl-flow --output-tag sat40_uav50_photo10s
+```
+
+如果要对 7 个路由算法做同场景横评：
+
+```bash
+python algorithms/benchmark_algorithms.py traces/sat_trace_40 --uav-file traces/uav_trace_50 --traffic-model photo --photo-interval-s 10 --photo-size-mb 12 --no-ctrl-flow --max-steps 6000 --save-outputs --output-dir outputs/benchmark_sat40_uav50_photo10s
+```
+
+说明：
+
+- `--uav-file` 现在既可以传单个 CSV，也可以直接传 UAV trace 目录
+- `--traffic-model photo` 会在 `t = 0, 10, 20, ..., 590s` 为每架在线 UAV 生成一条照片上报请求
+- `12 MB / 10 s` 会被换算为规则里的 `req_bw_mbps = 9.6`
+- `--output-tag` 会直接进入输出目录名，避免覆盖旧场景
+
 ### 4) 原始实验 1/2/3（已集成 11 方法）
 
 ```bash
@@ -139,6 +160,11 @@ python run_all_project_experiments.py --only otcp --otcp-mode all --otcp-max-ste
 - OTCP/cache baseline 指标与总控清单：`results/`
   - `metrics.json`
   - `project_experiment_manifest.json`
+
+## 导出手册
+
+- `links` / `rules` 的生成与导出操作手册见：`docs/Link_Rule_Export_Manual.md`
+- 这份手册包含：新场景运行命令、`links`/`rules` 字段解释、分块规则、以及导出到下游模块时的目录组织建议
 
 ## 备注
 
