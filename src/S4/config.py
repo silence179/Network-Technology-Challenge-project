@@ -1,13 +1,13 @@
-# 模式选择："soft" 为 mode_b，其他为 mode_a
-MODE = "soft"
+# 模式选择："soft" 为 mode_b，其他为 mode_a（运行时会由 main_s4 互动设定）
+MODE = ""
 
-# CSV 文件夹路径，存储网络拓扑信息
-csv_dir = "../S3/outputs/output_25/links"
-# JSON 文件夹路径，存储路由规则
-rules_dir = "../S3/outputs/output_25/rules"
+# CSV 文件夹路径，存储网络拓扑信息（运行时由 main_s4 根据用户选择设定）
+csv_dir = ""
+# JSON 文件夹路径，存储路由规则（运行时设定）
+rules_dir = ""
 
-sat_dir = "../S3/traces/sat_trace_25"
-uav_csv = "../S3/traces/uav_trace_full.csv"
+sat_dir = ""
+uav_dir = ""
 
 
 from enum import Enum

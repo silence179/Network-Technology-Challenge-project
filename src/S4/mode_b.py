@@ -20,16 +20,16 @@ class Engine:
 
     def addLink(self, link):
         """在内部拓扑图中添加一条链路"""
-        edge_attr = {k : v for k, v in link.items() if k != 'direction' and k != 'src' and k != 'dst'}
+        edge_attr = {k : v for k, v in link.items() if k != 'direction' and k != 'src' and k != 'dst'} 
         self.G.add_node(link['src'])
         self.G.add_node(link['dst'])
 
-        if link['direction'] == 'BIDIR':
+        if link['direction'] == 'BIDIR': # 双向链路需要在图中添加两条边
             self.G.add_edge(link['src'], link['dst'], **edge_attr)
             self.G.add_edge(link['dst'], link['src'], **edge_attr)
-        elif link['direction'] == 'UNIDIR':
+        elif link['direction'] == 'UNIDIR': # 单向链路只需要在图中添加一条边
             self.G.add_edge(link['src'], link['dst'], **edge_attr)
-        else:
+        else: # 其他方向类型，抛出异常
             raise RuntimeError('wrong direction type')
             
     def PrintGraph(self):
@@ -43,7 +43,7 @@ class Engine:
             print(f"错误: 文件 {csv_path} 不存在")
             return
 
-        with open(csv_path, mode='r', encoding='utf-8', newline='') as f:
+        with open(csv_path, mode='r', encoding='utf-8', newline='') as f: 
             reader = csv.DictReader(f)
             
             # 检查必要的列是否存在
@@ -53,7 +53,7 @@ class Engine:
                 return
 
             for row in reader:
-                node_id = row['node_id'].strip()
+                node_id = row['node_id'].strip() 
                 ip_addr = row['ip'].strip()
                 self.ip[node_id] = ip_addr
 

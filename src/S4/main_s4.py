@@ -1,7 +1,7 @@
 import config as cf
 from config import action, LogColor
-from config import csv_dir, rules_dir
 import os
+import sys
 import csv
 import time
 import json
@@ -11,12 +11,46 @@ import pandas as pd
 from generate import generate_sar_traffic, generate_uav_requests
 
 
-if cf.MODE == "soft":
-    from mode_b import Engine
-    LogColor.info("mode b imported")
-else:
-    from mode_a import Engine
-    LogColor.info("mode a imported")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+S3_OUTPUTS_BASE = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "S3", "outputs"))
+S3_TRACES_BASE = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "S3", "traces"))
+
+
+def scan_output_dirs():
+    """扫描 S3/outputs/ 下可用的 output_m_n 目录"""
+    output_dirs = {}
+    if not os.path.isdir(S3_OUTPUTS_BASE):
+        return output_dirs
+    for d in os.listdir(S3_OUTPUTS_BASE):
+        full = os.path.join(S3_OUTPUTS_BASE, d)
+        if not d.startswith("output_") or not os.path.isdir(full):
+            continue
+        suffix = d.replace("output_", "", 1)
+        parts = suffix.split("_")
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            output_dirs[(int(parts[0]), int(parts[1]))] = full
+    return output_dirs
+
+
+def select_from_dict(prompt, items_dict):
+    """通用的互动选择辅助函数"""
+    keys = sorted(items_dict)
+    for k in keys:
+        print(f"  {k}")
+    while True:
+        try:
+            choice = input(prompt).strip()
+            # 嘗试直接匹配 key 的显示格式
+            for k in keys:
+                if isinstance(k, tuple):
+                    if choice == f"{k[0]}_{k[1]}":
+                        return items_dict[k], k
+                elif choice == str(k):
+                    return items_dict[k], k
+            print("  无效选择，请重试")
+        except (EOFError, KeyboardInterrupt):
+            print("\n[Exit]")
+            sys.exit(0)
 
 def ReadLinks(csv_path):
     """读取 CSV 文件，返回链路信息列表"""
@@ -84,19 +118,67 @@ def GetAllFiles(relative_path) -> list:
 
 def run():
     """主模拟流程：初始化网络、加载链路与规则、生成请求并执行模拟"""
+
+    # ── 1. 选择 S3 output 目录 ──
+    output_dirs = scan_output_dirs()
+    if not output_dirs:
+        LogColor.error("S3/outputs/ 下没有任何 output_m_n 目录，请先执行 S3")
+        return
+
+    print("\n可用的 S3 output_m_n 目录:")
+    selected_output, (sat_n, uav_n) = select_from_dict(
+        "请输入要使用的 m_n (例如 40_50): ", output_dirs
+    )
+
+    # ── 2. 选择模式 ──
+    print("\n请选择模式:")
+    print("  a - mode_a (mininet)")
+    print("  b - mode_b (networkx)")
+    while True:
+        try:
+            mode_choice = input("请输入 a 或 b: ").strip().lower()
+            if mode_choice in ("a", "b"):
+                break
+            print("  请输入 a 或 b")
+        except (EOFError, KeyboardInterrupt):
+            print("\n[Exit]")
+            return
+
+    cf.MODE = "soft" if mode_choice == "b" else "hard"
+    cf.csv_dir = os.path.join(selected_output, "links")
+    cf.rules_dir = os.path.join(selected_output, "rules")
+    cf.sat_dir = os.path.join(S3_TRACES_BASE, "sat_trace", f"sat_trace_{sat_n}")
+    cf.uav_dir = os.path.join(S3_TRACES_BASE, "uav_trace", f"uav_trace_{uav_n}")
+
+    print(f"\n📁 links  : {cf.csv_dir}")
+    print(f"📁 rules  : {cf.rules_dir}")
+    print(f"🛰️  sat   : {cf.sat_dir}")
+    print(f"🚁 uav   : {cf.uav_dir}")
+
+    # ── 3. 动态导入引擎 ──
+    if mode_choice == "b":
+        from mode_b import Engine
+        LogColor.info("mode b imported")
+    else:
+        from mode_a import Engine
+        LogColor.info("mode a imported")
+
     engine = Engine()
 
     time_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_csv = f'output/networks_{time_str}.csv'
+    output_dir = f'output/output_{sat_n}_{uav_n}'
+    os.makedirs(output_dir, exist_ok=True)
+    output_csv = f'{output_dir}/networks_{time_str}.csv'
 
-    sat_csv = GetAllFiles(cf.sat_dir)
-
-    for sat in sat_csv:
+    sat_csvs = GetAllFiles(cf.sat_dir)
+    for sat in sat_csvs:
         engine.Get_ip(sat)
 
-    engine.Get_ip(cf.uav_csv)
+    uav_csvs = GetAllFiles(cf.uav_dir)
+    for uav in uav_csvs:
+        engine.Get_ip(uav)
 
-    uav_list = ['UAV_01', 'UAV_02', 'UAV_03', 'UAV_04', 'UAV_05', 'UAV_06', 'UAV_07', 'UAV_08', 'UAV_09', 'UAV_10']
+    uav_list = [f'UAV_{i+1:02d}' for i in range(uav_n)]
     main_gs = 'GS_01'
 
     # 注册所有内容到系统中
@@ -128,8 +210,8 @@ def run():
     reqs = sar_requests + uav_requests
     reqs.sort(key=lambda x: x['time'])
 
-    csv_files = GetAllFiles(csv_dir)
-    rules_files = GetAllFiles(rules_dir)
+    csv_files = GetAllFiles(cf.csv_dir)
+    rules_files = GetAllFiles(cf.rules_dir)
 
     csv_list = list()
     meta = list()
@@ -143,7 +225,7 @@ def run():
 
 
     if csv_files and rules_files:
-        LogColor.info(f"csv file: {csv_dir}\nrules file: {rules_dir}\n")
+        LogColor.info(f"csv file: {cf.csv_dir}\nrules file: {cf.rules_dir}\n")
 
         timer = 0
         req_ind = 0
