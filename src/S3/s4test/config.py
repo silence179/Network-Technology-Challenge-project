@@ -1,0 +1,81 @@
+# 模式选择："soft" 为 mode_b，其他为 mode_a（运行时会由 main_s4 互动设定）
+MODE = ""
+
+# CSV 文件夹路径，存储网络拓扑信息（运行时由 main_s4 根据用户选择设定）
+csv_dir = ""
+# JSON 文件夹路径，存储路由规则（运行时设定）
+rules_dir = ""
+
+sat_dir = ""
+uav_dir = ""
+
+
+from enum import Enum
+class action(Enum):
+    NOP = 1       # 空操作
+    ADD = 2       # 添加
+    DEL = 3       # 删除
+    REPLACE = 4   # 替换
+
+
+import logging
+import os
+class LogColor:
+    """
+    根据不同的日志级别，打印不同颜色的日志，并将日志写入不同的文件。
+    info：绿色
+    warning：黄色
+    error：红色
+    debug：灰色
+    """
+    # 确保日志文件夹存在
+    log_dir = "logs"
+    os.makedirs(log_dir, exist_ok=True)
+
+    # 定义不同日志级别的文件
+    info_log_file = os.path.join(log_dir, "info_runtime.log")
+    warning_log_file = os.path.join(log_dir, "warning_runtime.log")
+    error_log_file = os.path.join(log_dir, "error_runtime.log")
+    debug_log_file = os.path.join(log_dir, "debug_runtime.log")
+
+    # 配置不同的日志记录器
+    info_logger = logging.getLogger("info_logger")
+    warning_logger = logging.getLogger("warning_logger")
+    error_logger = logging.getLogger("error_logger")
+    debug_logger = logging.getLogger("debug_logger")
+
+    for logger, log_file in [
+        (info_logger, info_log_file),
+        (warning_logger, warning_log_file),
+        (error_logger, error_log_file),
+        (debug_logger, debug_log_file)
+    ]:
+        handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s: %(message)s'))
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+
+    @staticmethod
+    def info(message: str):
+        """输出 info 级别日志（绿色）"""
+        LogColor.info_logger.info(message)
+        print("\033[0;32m" + message + "\033[0m")
+
+    @staticmethod
+    def warning(message: str):
+        """输出 warning 级别日志（黄色）"""
+        LogColor.warning_logger.warning(message)
+        print("\033[0;33m" + message + "\033[0m")
+
+    @staticmethod
+    def error(message: str):
+        """输出 error 级别日志（红色）"""
+        formatted_message = "-" * 120 + '\n| ' + message + "\n" + "└" + "-" * 150
+        LogColor.error_logger.error(formatted_message)
+        print("\033[0;31m" + formatted_message + "\033[0m")
+
+    @staticmethod
+    def debug(message: str):
+        """输出 debug 级别日志（灰色）"""
+        LogColor.debug_logger.debug(message)
+        print("\033[0;37m" + message + "\033[0m")
