@@ -18,6 +18,10 @@ class Engine:
         """非动态拓扑，无需清理"""
         pass
 
+    def FlushLog(self, csv_path):
+        """日志已在 WriteLog 中实时写入，此方法为兼容保留"""
+        pass
+
     def addLink(self, link):
         """在内部拓扑图中添加一条链路"""
         edge_attr = {k : v for k, v in link.items() if k != 'direction' and k != 'src' and k != 'dst'} 
@@ -59,7 +63,7 @@ class Engine:
 
     def UpdateRule(self, rule, meta):
         """更新路由规则（支持 ADD / REPLACE / DEL 操作）"""
-        self.version = meta['version']
+        self.version = meta.get('version', 'unknown')
 
         node = rule['node']
         rule_data = {k: v for k, v in rule.items() if k != "node"}
