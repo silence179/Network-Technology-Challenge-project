@@ -1,6 +1,7 @@
 import config as cf
 from config import action, LogColor
 import os
+import re
 import sys
 import csv
 import time
@@ -17,7 +18,7 @@ S3_TRACES_BASE = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "S3", "traces"))
 
 
 def scan_output_dirs():
-    """扫描 S3/outputs/ 下可用的 output_m_n 目录"""
+    """扫描 S3/outputs/ 下可用的 output_* 目录，提取 sat 和 uav 数量"""
     output_dirs = {}
     if not os.path.isdir(S3_OUTPUTS_BASE):
         return output_dirs
@@ -25,28 +26,56 @@ def scan_output_dirs():
         full = os.path.join(S3_OUTPUTS_BASE, d)
         if not d.startswith("output_") or not os.path.isdir(full):
             continue
-        suffix = d.replace("output_", "", 1)
-        parts = suffix.split("_")
-        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-            output_dirs[(int(parts[0]), int(parts[1]))] = full
+        m_sat = re.search(r'sat(\d+)', d)
+        m_uav = re.search(r'uav(\d+)', d)
+        if m_sat and m_uav:
+            key = (int(m_sat.group(1)), int(m_uav.group(1)))
+        else:
+            # 兼容旧格式 output_40_50
+            suffix = d.replace("output_", "", 1)
+            parts = suffix.split("_")
+            if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+                key = (int(parts[0]), int(parts[1]))
+            else:
+                continue
+        if key not in output_dirs:
+            output_dirs[key] = []
+        output_dirs[key].append(full)
     return output_dirs
 
 
 def select_from_dict(prompt, items_dict):
-    """通用的互动选择辅助函数"""
+    """通用的互动选择辅助函数，支持多选项合并选择"""
     keys = sorted(items_dict)
     for k in keys:
-        print(f"  {k}")
+        dirs = items_dict[k]
+        label = f"sat{k[0]}_uav{k[1]}"
+        if len(dirs) == 1:
+            print(f"  {label}  ->  {os.path.basename(dirs[0])}")
+        else:
+            print(f"  {label}  ({len(dirs)} 个匹配):")
+            for d in dirs:
+                print(f"         {os.path.basename(d)}")
     while True:
         try:
             choice = input(prompt).strip()
-            # 嘗试直接匹配 key 的显示格式
             for k in keys:
-                if isinstance(k, tuple):
-                    if choice == f"{k[0]}_{k[1]}":
-                        return items_dict[k], k
-                elif choice == str(k):
-                    return items_dict[k], k
+                if choice == f"{k[0]}_{k[1]}":
+                    dirs = items_dict[k]
+                    if len(dirs) == 1:
+                        return dirs[0], k
+                    else:
+                        print(f"  sat{k[0]}_uav{k[1]} 有多个匹配，请选择:")
+                        for i, d in enumerate(dirs, 1):
+                            print(f"    {i}. {os.path.basename(d)}")
+                        while True:
+                            try:
+                                idx = int(input("  输入序号: ").strip())
+                                if 1 <= idx <= len(dirs):
+                                    return dirs[idx - 1], k
+                            except (ValueError, EOFError, KeyboardInterrupt):
+                                pass
+                            print("  无效序号")
             print("  无效选择，请重试")
         except (EOFError, KeyboardInterrupt):
             print("\n[Exit]")
@@ -150,10 +179,10 @@ def run():
     cf.sat_dir = os.path.join(S3_TRACES_BASE, "sat_trace", f"sat_trace_{sat_n}")
     cf.uav_dir = os.path.join(S3_TRACES_BASE, "uav_trace", f"uav_trace_{uav_n}")
 
-    print(f"\n📁 links  : {cf.csv_dir}")
-    print(f"📁 rules  : {cf.rules_dir}")
-    print(f"🛰️  sat   : {cf.sat_dir}")
-    print(f"🚁 uav   : {cf.uav_dir}")
+    print(f"\n[links]  {cf.csv_dir}")
+    print(f"[rules]  {cf.rules_dir}")
+    print(f"[sat]    {cf.sat_dir}")
+    print(f"[uav]    {cf.uav_dir}")
 
     # ── 3. 动态导入引擎 ──
     if mode_choice == "b":
@@ -183,18 +212,15 @@ def run():
 
     # 注册所有内容到系统中
     for uav in uav_list:
-        engine.AddContent(target=uav, filename=f'telemetry_{uav}', filesize=0.1)       # 遥测数据
-        engine.AddContent(target=uav, filename=f'low_res_img_{uav}', filesize=5.0)      # 低分辨率图像（约 5MB）
-        engine.AddContent(target=uav, filename=f'status_update_{uav}', filesize=0.2)    # 无人机状态更新
-        engine.AddContent(target=uav, filename=f'fuel_status_{uav}', filesize=0.1)      # 无人机燃油状态
+        # UAV→GS 照片上传（存储在 GS 端，UAV 发起请求，匹配 S3 路由方向）
+        engine.AddContent(target=main_gs, filename=f'photo_upload_{uav}', filesize=12.0)
+        # UAV→GS 遥测上传
+        engine.AddContent(target=main_gs, filename=f'telemetry_upload_{uav}', filesize=0.1)
+        # UAV 间通信内容
+        engine.AddContent(target=uav, filename=f'status_update_{uav}', filesize=0.2)
+        engine.AddContent(target=uav, filename=f'fuel_status_{uav}', filesize=0.1)
 
-    # 4K 视频流（由 UAV_02 提供，约 10MB/帧）
-    engine.AddContent(target='UAV_02', filename='4k_video_stream', filesize=10.0)
-
-    # 集结命令（由地面站提供，约 10KB）
-    engine.AddContent(target=main_gs, filename='c2_converge_cmd', filesize=0.01)
-
-    # 全局共享内容
+    # 全局共享内容（UAV 间）
     engine.AddContent(target=main_gs, filename='target_location_update', filesize=0.3)
     engine.AddContent(target=main_gs, filename='emergency_assistance', filesize=0.1)
 
