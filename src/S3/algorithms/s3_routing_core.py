@@ -71,9 +71,25 @@ FLOWS = {
 
 TRAFFIC_MODEL_LEGACY = "legacy"
 TRAFFIC_MODEL_PERIODIC_PHOTO = "photo"
+TRAFFIC_MODEL_S4_COMPAT = "s4"
 DEFAULT_PHOTO_INTERVAL_S = 10.0
 DEFAULT_PHOTO_SIZE_MB = 12.0
 DEFAULT_PHOTO_PRIORITY = "NORMAL"
+S4_COMPAT_MAX_HOPS = {
+    "s4_gs_to_uav": 2,
+    "s4_uav_to_gs": 3,
+    "s4_uav_to_uav": 2,
+}
+S4_COMPAT_MAX_DELAY_MS = {
+    "s4_gs_to_uav": 8.0,
+    "s4_uav_to_gs": 8.0,
+    "s4_uav_to_uav": 6.0,
+}
+S4_COMPAT_MIN_BW_MBPS = {
+    "s4_gs_to_uav": 10.0,
+    "s4_uav_to_gs": 10.0,
+    "s4_uav_to_uav": 10.0,
+}
 
 
 class NumpyEncoder(json.JSONEncoder):
@@ -421,6 +437,67 @@ def build_periodic_photo_flow_config(uav_id, photo_size_mb, photo_interval_s):
     }
 
 
+def build_s4_compat_flow_requests(active_nodes):
+    requests = []
+    active_node_set = set(active_nodes)
+    active_uavs = sorted(node_id for node_id in active_node_set if str(node_id).startswith("UAV_"))
+    if not active_uavs:
+        return requests
+
+    gs_id = "GS_01"
+    if gs_id in active_node_set:
+        for uav_id in active_uavs:
+            requests.append(
+                {
+                    "flow_name": f"S4_GS_TO_{uav_id}",
+                    "src": gs_id,
+                    "dst": uav_id,
+                    "config": {
+                        "src": gs_id,
+                        "priority": "NORMAL",
+                        "base_bw_mbps": 10.0,
+                        "dst_cidr": "0.0.0.0/0",
+                        "traffic_type": "s4_gs_to_uav",
+                    },
+                }
+            )
+            requests.append(
+                {
+                    "flow_name": f"S4_{uav_id}_TO_GS",
+                    "src": uav_id,
+                    "dst": gs_id,
+                    "config": {
+                        "src": uav_id,
+                        "priority": "HIGH",
+                        "base_bw_mbps": 10.0,
+                        "dst_cidr": "0.0.0.0/0",
+                        "traffic_type": "s4_uav_to_gs",
+                    },
+                }
+            )
+
+    for source_uav in active_uavs:
+        for target_uav in active_uavs:
+            if source_uav == target_uav:
+                continue
+            requests.append(
+                {
+                    "flow_name": f"S4_{source_uav}_TO_{target_uav}",
+                    "src": source_uav,
+                    "dst": target_uav,
+                    "config": {
+                        "src": source_uav,
+                        "priority": "NORMAL",
+                        "base_bw_mbps": 2.0,
+                        "dst_cidr": "0.0.0.0/0",
+                        "traffic_type": "s4_uav_to_uav",
+                    },
+                }
+            )
+
+    return requests
+
+
 def build_flow_requests(
     active_nodes,
     current_time_ms,
@@ -428,9 +505,14 @@ def build_flow_requests(
     photo_interval_s=DEFAULT_PHOTO_INTERVAL_S,
     photo_size_mb=DEFAULT_PHOTO_SIZE_MB,
     include_ctrl_flow=True,
+    emit_photo_every_step=False,
 ):
     requests = []
     active_node_set = set(active_nodes)
+
+    if traffic_model == TRAFFIC_MODEL_S4_COMPAT:
+        return build_s4_compat_flow_requests(active_nodes)
+
     if include_ctrl_flow and FLOWS["CTRL_FLOW"]["src"] in active_node_set:
         active_uavs = sorted(node_id for node_id in active_node_set if node_id.startswith("UAV_"))
         for target_uav in active_uavs:
@@ -445,7 +527,7 @@ def build_flow_requests(
 
     if traffic_model == TRAFFIC_MODEL_PERIODIC_PHOTO:
         interval_ms = max(1, int(round(photo_interval_s * 1000.0)))
-        if current_time_ms % interval_ms != 0:
+        if not emit_photo_every_step and current_time_ms % interval_ms != 0:
             return requests
 
         if "GS_01" in active_node_set:
@@ -553,25 +635,48 @@ def summarize_path(path, edge_lookup):
     return total_delay, bottleneck
 
 
-def make_rule(flow_request, plan, time_ms, node_ip_map):
-    next_hop = plan.path[1]
+def make_rules(flow_request, plan, time_ms, node_ip_map):
     destination = flow_request["dst"]
     flow_name = flow_request["flow_name"]
     flow_config = flow_request["config"]
-    return {
-        "time_ms": int(time_ms),
-        "node": flow_request["src"],
-        "dst_cidr": f"{node_ip_map.get(destination, '0.0.0.0')}/32",
-        "action": "replace",
-        "next_hop": next_hop,
-        "next_hop_ip": node_ip_map.get(next_hop, "0.0.0.0"),
-        "algo": plan.algo,
-        "req_bw_mbps": get_current_bandwidth(flow_name, flow_config, time_ms),
-        "traffic_type": flow_config.get("traffic_type", "continuous"),
-        "photo_size_mb": flow_config.get("photo_size_mb"),
-        "photo_interval_s": flow_config.get("photo_interval_s"),
-        "debug_info": plan.notes,
-    }
+    rules = []
+    for current_node, next_hop in zip(plan.path[:-1], plan.path[1:]):
+        rules.append(
+            {
+                "time_ms": int(time_ms),
+                "node": current_node,
+                "dst_cidr": f"{node_ip_map.get(destination, '0.0.0.0')}/32",
+                "action": "replace",
+                "next_hop": next_hop,
+                "next_hop_ip": node_ip_map.get(next_hop, "0.0.0.0"),
+                "algo": plan.algo,
+                "req_bw_mbps": get_current_bandwidth(flow_name, flow_config, time_ms),
+                "traffic_type": flow_config.get("traffic_type", "continuous"),
+                "photo_size_mb": flow_config.get("photo_size_mb"),
+                "photo_interval_s": flow_config.get("photo_interval_s"),
+                "debug_info": plan.notes,
+            }
+        )
+    return rules
+
+
+def should_export_plan(flow_request, plan):
+    traffic_type = flow_request["config"].get("traffic_type")
+    if not traffic_type or not str(traffic_type).startswith("s4_"):
+        return True
+
+    hop_count = max(0, len(plan.path) - 1)
+    max_hops = S4_COMPAT_MAX_HOPS.get(traffic_type)
+    max_delay_ms = S4_COMPAT_MAX_DELAY_MS.get(traffic_type)
+    min_bw_mbps = S4_COMPAT_MIN_BW_MBPS.get(traffic_type)
+
+    if max_hops is not None and hop_count > max_hops:
+        return False
+    if max_delay_ms is not None and plan.estimated_delay_ms > max_delay_ms:
+        return False
+    if min_bw_mbps is not None and plan.bottleneck_bw_mbps < min_bw_mbps:
+        return False
+    return True
 
 
 class BaseRouter:
@@ -1114,7 +1219,7 @@ def save_chunk(output_link_dir, output_rule_dir, chunk_index, start_ms, end_ms, 
                 df_links[column] = None
         df_links[link_columns].to_csv(os.path.join(output_link_dir, link_filename), index=False)
 
-    payload = {"meta": {"chunk_id": chunk_index}, "rules": chunk_rules}
+    payload = {"meta": {"chunk_id": chunk_index, "version": "standalone-v1"}, "rules": chunk_rules}
     with open(os.path.join(output_rule_dir, rule_filename), "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, cls=NumpyEncoder)
 
@@ -1184,15 +1289,6 @@ def run_simulation(
     for step_index, timestamp in enumerate(timelines):
         time_ms = int(timestamp)
         nodes_df = get_nodes_at_timestamp(df_sat, df_uav, time_ms)
-        flow_requests = build_flow_requests(
-            nodes_df["node_id"].values if not nodes_df.empty else [],
-            time_ms,
-            traffic_model=traffic_model,
-            photo_interval_s=photo_interval_s,
-            photo_size_mb=photo_size_mb,
-            include_ctrl_flow=include_ctrl_flow,
-        )
-
         topology_changed = False
         reused_topology = False
         if step_index - last_topology_step >= TOPO_HASH_INTERVAL or step_index == 0:
@@ -1209,6 +1305,32 @@ def run_simulation(
                 copied_link = link.copy()
                 copied_link["time_ms"] = time_ms
                 links.append(copied_link)
+
+        node_ids = nodes_df["node_id"].values if not nodes_df.empty else []
+        should_emit_s4_rules = traffic_model != TRAFFIC_MODEL_S4_COMPAT or topology_changed or step_index == 0
+        if should_emit_s4_rules:
+            flow_requests = build_flow_requests(
+                node_ids,
+                time_ms,
+                traffic_model=traffic_model,
+                photo_interval_s=photo_interval_s,
+                photo_size_mb=photo_size_mb,
+                include_ctrl_flow=include_ctrl_flow,
+            )
+        else:
+            flow_requests = []
+
+        export_flow_requests = flow_requests
+        if traffic_model == TRAFFIC_MODEL_PERIODIC_PHOTO and not flow_requests:
+            export_flow_requests = build_flow_requests(
+                node_ids,
+                time_ms,
+                traffic_model=traffic_model,
+                photo_interval_s=photo_interval_s,
+                photo_size_mb=photo_size_mb,
+                include_ctrl_flow=include_ctrl_flow,
+                emit_photo_every_step=True,
+            )
 
         active_links = [link for link in links if link.get("status", "UP") == "UP"]
         node_loads = defaultdict(int)
@@ -1229,20 +1351,28 @@ def run_simulation(
 
         stats.total_flow_requests += len(flow_requests)
         step_rules = []
+        counted_flow_keys = {
+            (flow_request["flow_name"], flow_request["src"], flow_request["dst"])
+            for flow_request in flow_requests
+        }
 
-        for flow_request in flow_requests:
+        for flow_request in export_flow_requests:
             route_start = time.perf_counter()
             plan = router.plan_route(flow_request, context)
             stats.routing_compute_time_ms += (time.perf_counter() - route_start) * 1000.0
+            flow_key = (flow_request["flow_name"], flow_request["src"], flow_request["dst"])
+            count_in_stats = flow_key in counted_flow_keys
 
-            if plan is None or len(plan.path) < 2:
-                stats.record_failure()
+            if plan is None or len(plan.path) < 2 or not should_export_plan(flow_request, plan):
+                if count_in_stats:
+                    stats.record_failure()
                 continue
 
-            step_rules.append(make_rule(flow_request, plan, time_ms, node_ip_map))
+            step_rules.extend(make_rules(flow_request, plan, time_ms, node_ip_map))
             for node_id in plan.path[1:]:
                 node_loads[node_id] += 1
-            stats.record_success(plan)
+            if count_in_stats:
+                stats.record_success(plan)
 
         chunk_links.extend(links)
         chunk_rules.extend(step_rules)
@@ -1282,7 +1412,7 @@ def run_cli(router_name):
     parser.add_argument("--no-save", action="store_true")
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--output-tag", default=None)
-    parser.add_argument("--traffic-model", choices=[TRAFFIC_MODEL_LEGACY, TRAFFIC_MODEL_PERIODIC_PHOTO], default=TRAFFIC_MODEL_LEGACY)
+    parser.add_argument("--traffic-model", choices=[TRAFFIC_MODEL_LEGACY, TRAFFIC_MODEL_PERIODIC_PHOTO, TRAFFIC_MODEL_S4_COMPAT], default=TRAFFIC_MODEL_LEGACY)
     parser.add_argument("--photo-interval-s", type=float, default=DEFAULT_PHOTO_INTERVAL_S)
     parser.add_argument("--photo-size-mb", type=float, default=DEFAULT_PHOTO_SIZE_MB)
     parser.add_argument("--no-ctrl-flow", action="store_true")
