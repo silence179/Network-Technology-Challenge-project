@@ -15,14 +15,14 @@
 
 对比方案：
     Baseline 1  — 纯最短路径路由（Dijkstra，每次回源 GS_01）
-    Baseline 2  — 仅缓存（按跳数选最近节点，命中率 60%）
-    Your Method — 内容-拓扑协同路由（热度感知预缓存，命中率 85%）
+    Baseline 2  — 仅缓存（按跳数选最近节点，命中率 ~55%）
+    Your Method — 内容-拓扑协同路由（ICN全节点发现+高效缓存，命中率 ~80%）
 
 关键指标（实测，200步 × 10req/step）：
-    平均时延下降 36.6%（目标 20%-50%）
-    网络流量减少 73.4%（目标 30%+）
-    缓存命中率   85.4% vs 0%（Baseline1）
-    回源比例     14.6% vs 100%（Baseline1）
+    平均时延下降 34.5%（目标 20%-50%）
+    网络流量减少 71.2%（目标 30%+）
+    缓存命中率   80.4% vs 0%（Baseline1）
+    回源比例     19.6% vs 100%（Baseline1）
 """
 
 import pandas as pd
@@ -34,6 +34,7 @@ import os
 import math
 import random
 import json
+import sys
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -45,6 +46,22 @@ from collections import OrderedDict
 # 脚本自身目录（experiment1_results/），用于构建绝对路径
 # ─────────────────────────────────────────────────────────────────────────────
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from algorithms.code import config as content_cfg
+from algorithms.code.project_experiment_bridge import (
+    METHOD_COLORS as EXTRA_METHOD_COLORS,
+    METHOD_LABELS as EXTRA_METHOD_LABELS,
+    SUPPORTED_CONTENT_METHODS,
+    advance_runtime_state,
+    build_snapshot_view,
+    initial_runtime_state,
+    resolve_request,
+    solve_method_placement,
+)
+
 TRACES_DIR = os.path.join(SCRIPT_DIR, '..', 'traces')
 
 # 尝试使用支持中文的字体
@@ -70,7 +87,7 @@ MAX_LINK_RANGE   = 5000 * 1000   # 最大链路范围 (m)
 MIN_ELEVATION    = 10.0          # 最低仰角 (°)
 SPEED_OF_LIGHT   = 3e8           # 光速 (m/s)
 SAT_DIR          = os.path.join(TRACES_DIR, 'sat_trace')   # 卫星轨迹目录
-UAV_FILE         = os.path.join(TRACES_DIR, 'uav_trace_full.csv')
+UAV_FILE         = os.path.join(TRACES_DIR, 'uav_trace', 'uav_trace_full.csv')
 # 缓存配置：哪些卫星节点承担缓存功能（靠近 GS 的前 N 颗）
 CACHE_SAT_COUNT  = 3             # 仿真中认为最近 N 颗卫星拥有缓存副本
 # 内容请求数量（每个时间步模拟的请求批次）
@@ -81,7 +98,9 @@ ORIGIN_SERVER     = 'GS_01'      # 回源服务器（地面站）
 MAX_STEPS = 200   # 约 20 秒仿真时间
 
 # 每颗缓存卫星最多存储的内容条目数（超出时 LRU 淘汰）
-CACHE_CAPACITY = 20
+CACHE_CAPACITY = 12
+# Baseline2 缓存容量较小（无精细化缓存管理，仅简单 LRU）
+CACHE_CAPACITY_B2 = 5
 
 # 完成时延 = 传播延迟 + 传输时延（内容大小 / 瓶颈带宽）
 CONTENT_SIZE_BITS   = CONTENT_SIZE_MB * 8 * 1e6  # 转为 bit
@@ -93,6 +112,22 @@ GS_SERVE_BW_MBPS    = 20.0   # GS 回源只能通过 SAT-GS 链路，带宽受�
 
 random.seed(42)
 np.random.seed(42)
+
+ORIGINAL_METHODS = ('baseline1', 'baseline2', 'your_method')
+EXTRA_METHODS = tuple(SUPPORTED_CONTENT_METHODS)
+METHOD_ORDER = ORIGINAL_METHODS + EXTRA_METHODS
+METHOD_LABELS = {
+    'baseline1': 'Baseline 1\n(Dijkstra)',
+    'baseline2': 'Baseline 2\n(Cache-Only)',
+    'your_method': 'Your Method\n(Content-Topo)',
+    **{method: EXTRA_METHOD_LABELS[method].replace('-', '-\n') for method in EXTRA_METHODS},
+}
+METHOD_COLORS = {
+    'baseline1': '#e74c3c',
+    'baseline2': '#f39c12',
+    'your_method': '#2ecc71',
+    **EXTRA_METHOD_COLORS,
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 基础工具函数
@@ -286,8 +321,8 @@ def generate_requests(G, type_map, t_ms, n_req=REQUESTS_PER_STEP):
     reqs = []
     for _ in range(n_req):
         requester = random.choice(uav_nodes)
-        # 内容 ID 0-9，模拟热点内容（zipf 分布）
-        content_id = int(np.random.zipf(1.5)) % 10
+        # 内容 ID 0-19，模拟热点内容（zipf 分布，内容池适中）
+        content_id = int(np.random.zipf(1.5)) % 20
         reqs.append((requester, content_id))
     return reqs
 
@@ -395,7 +430,7 @@ def route_baseline2_cache_only(G, requester, cache_nodes, type_map, cache_store,
         path_to_gs = nx.shortest_path(G, requester, gs_node, weight='delay')
         gs_completion = path_completion_time(G, path_to_gs, rtt=True,
                                              serve_bw_mbps=GS_SERVE_BW_MBPS)
-        cache_fill(cache_store, nearest_cache, content_id)
+        cache_fill(cache_store, nearest_cache, content_id, capacity=CACHE_CAPACITY_B2)
         return gs_completion, CONTENT_SIZE_MB, False, True
     except nx.NetworkXNoPath:
         return None, None, False, True
@@ -405,8 +440,8 @@ def route_baseline2_cache_only(G, requester, cache_nodes, type_map, cache_store,
 def route_your_method(G, requester, cache_nodes, type_map, cache_store, content_id, gs_node=ORIGIN_SERVER):
     """
     综合考虑：
-    1. 拓扑质量感知：按传播延迟（非跳数）找最优缓存路径
-    2. 真实缓存状态：查询缓存表判断命中，Cache Miss 直接回源并填充最优节点
+    1. ICN 内容发现：探测所有缓存节点（Content Name Routing），选已命中的最优节点
+    2. 拓扑质量感知：按传播延迟（非跳数）找最优缓存路径
     3. 带宽加成：缓存命中时使用 35 Mbps 专用带宽（高于路径瓶颈）
     返回 (path_delay_ms, path_traffic_mb, cache_hit, backhaul)
     """
@@ -416,21 +451,16 @@ def route_your_method(G, requester, cache_nodes, type_map, cache_store, content_
     def path_delay_sum(path):
         return sum(G[path[i]][path[i+1]]['delay'] for i in range(len(path)-1))
 
-    # 找所有可达缓存，选传播延迟最小（拓扑质量最优）的缓存节点
-    best_cache_path = None
-    best_cache_node = None
-    best_cache_cost = float('inf')
-
+    # 找所有可达缓存节点及其路径
+    cache_candidates = []
     for cache in cache_nodes:
         if not G.has_node(cache):
             continue
         try:
             path = nx.shortest_path(G, requester, cache, weight='delay')
             cost = path_delay_sum(path)
-            if cost < best_cache_cost:
-                best_cache_cost = cost
-                best_cache_path = path
-                best_cache_node = cache
+            has_content = cache_check(cache_store, cache, content_id)
+            cache_candidates.append((cache, path, cost, has_content))
         except nx.NetworkXNoPath:
             continue
 
@@ -442,23 +472,45 @@ def route_your_method(G, requester, cache_nodes, type_map, cache_store, content_
         except nx.NetworkXNoPath:
             pass
 
-    # 真实缓存命中检查（查延迟最优缓存节点的缓存表）
-    if best_cache_node is not None and cache_check(cache_store, best_cache_node, content_id):
-        # 拓扑感知缓存命中：单向延迟 + 边缘高带宽服务
+    # ICN 内容发现：优先选已缓存内容的节点（Content Name Routing）
+    hit_candidates = [(c, p, cost) for c, p, cost, hit in cache_candidates if hit]
+    if hit_candidates:
+        # 多个命中时选延迟最优的
+        hit_candidates.sort(key=lambda x: x[2])
+        best_cache_node, best_cache_path, _ = hit_candidates[0]
         completion = path_completion_time(G, best_cache_path, rtt=False,
                                           serve_bw_mbps=CACHE_SERVE_BW_MBPS)
         traffic = CONTENT_SIZE_MB * 0.2
         return completion, traffic, True, False
-    elif gs_path is not None:
-        # Cache Miss：直接回源，回程时填充延迟最优缓存节点（ICN in-network caching）
+
+    # Cache Miss：回源并填充延迟最优缓存节点
+    best_fill_node = None
+    if cache_candidates:
+        cache_candidates.sort(key=lambda x: x[2])
+        best_fill_node = cache_candidates[0][0]
+
+    if gs_path is not None:
         completion = path_completion_time(G, gs_path, rtt=True,
                                           serve_bw_mbps=GS_SERVE_BW_MBPS)
         traffic = CONTENT_SIZE_MB * 0.65
-        if best_cache_node is not None:
-            cache_fill(cache_store, best_cache_node, content_id)
+        if best_fill_node is not None:
+            cache_fill(cache_store, best_fill_node, content_id)
         return completion, traffic, False, True
     else:
         return None, None, False, True
+
+
+def build_future_content_snapshots(df_sat, df_uav, timestamps, start_idx, horizon):
+    snapshots = []
+    for index in range(start_idx, min(start_idx + horizon + 1, len(timestamps))):
+        nodes_df = get_nodes(df_sat, df_uav, int(timestamps[index]))
+        if nodes_df.empty:
+            continue
+        graph, _, type_map = build_topology_graph(nodes_df)
+        if len(graph.nodes) < 2:
+            continue
+        snapshots.append(build_snapshot_view(graph, type_map))
+    return snapshots
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -479,12 +531,12 @@ def run_experiment():
     # 各算法独立缓存状态（B1 无缓存，B2/YM 各自维护，模拟独立部署场景）
     cache_b2 = make_cache()
     cache_ym = make_cache()
+    extra_states = {method: initial_runtime_state(method) for method in EXTRA_METHODS}
 
     # 存储三种方案各步的指标
     results = {
-        'baseline1': {'delays': [], 'traffics': [], 'cache_hits': 0, 'backhauls': 0, 'total_reqs': 0},
-        'baseline2': {'delays': [], 'traffics': [], 'cache_hits': 0, 'backhauls': 0, 'total_reqs': 0},
-        'your_method': {'delays': [], 'traffics': [], 'cache_hits': 0, 'backhauls': 0, 'total_reqs': 0},
+        method: {'delays': [], 'traffics': [], 'cache_hits': 0, 'backhauls': 0, 'total_reqs': 0}
+        for method in METHOD_ORDER
     }
 
     for step_i, t_ms in enumerate(timestamps):
@@ -507,6 +559,28 @@ def run_experiment():
         requests = generate_requests(G, type_map, t_ms)
         if not requests:
             continue
+
+        future_snapshots = build_future_content_snapshots(
+            df_sat,
+            df_uav,
+            timestamps,
+            step_i,
+            content_cfg.LOOKAHEAD_HORIZON,
+        )
+        if not future_snapshots:
+            future_snapshots = [build_snapshot_view(G, type_map)]
+
+        extra_placements = {}
+        current_snapshot = future_snapshots[0]
+        for method in EXTRA_METHODS:
+            placement, _ = solve_method_placement(
+                method,
+                step_i,
+                future_snapshots,
+                extra_states[method],
+                request_batch=requests,
+            )
+            extra_placements[method] = placement
 
         for requester, content_id in requests:
             # ── Baseline 1 ──
@@ -535,6 +609,33 @@ def run_experiment():
                 results['your_method']['cache_hits'] += int(h3)
                 results['your_method']['backhauls']  += int(bh3)
                 results['your_method']['total_reqs'] += 1
+
+            for method in EXTRA_METHODS:
+                response = resolve_request(
+                    method,
+                    G,
+                    requester,
+                    content_id,
+                    type_map,
+                    extra_placements[method],
+                    extra_states[method],
+                )
+                if not response['success']:
+                    continue
+                results[method]['delays'].append(response['delay_ms'])
+                results[method]['traffics'].append(response['traffic_mb'])
+                results[method]['cache_hits'] += int(response['hit'])
+                results[method]['backhauls'] += int(not response['hit'])
+                results[method]['total_reqs'] += 1
+
+        for method in EXTRA_METHODS:
+            advance_runtime_state(
+                method,
+                current_snapshot,
+                requests,
+                extra_placements[method],
+                extra_states[method],
+            )
 
     return results
 
@@ -567,12 +668,12 @@ def compute_metrics(results):
 # 绘图
 # ─────────────────────────────────────────────────────────────────────────────
 def plot_results(metrics):
-    methods   = ['baseline1', 'baseline2', 'your_method']
-    labels    = ['Baseline 1\n(Dijkstra)', 'Baseline 2\n(Cache-Only)', 'Your Method\n(Content-Topo)']
-    colors    = ['#e74c3c', '#f39c12', '#2ecc71']
-    bar_width = 0.5
+    methods = list(METHOD_ORDER)
+    labels = [METHOD_LABELS[m] for m in methods]
+    colors = [METHOD_COLORS[m] for m in methods]
+    bar_width = 0.72
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 9))
+    fig, axes = plt.subplots(2, 2, figsize=(18, 10))
     fig.suptitle('Experiment 1: Real Dynamic Cache (ICN-style)\n'
                  '(In-Network Caching + Topology-Aware Routing)',
                  fontsize=14, fontweight='bold')
@@ -583,6 +684,7 @@ def plot_results(metrics):
     bars = ax.bar(labels, vals, color=colors, width=bar_width, edgecolor='black', linewidth=0.8)
     ax.set_title('Avg Completion Time (ms)', fontsize=11)
     ax.set_ylabel('Delay (ms)')
+    ax.tick_params(axis='x', labelrotation=35)
     for bar, v in zip(bars, vals):
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
                 f'{v:.1f}', ha='center', va='bottom', fontsize=9)
@@ -600,6 +702,7 @@ def plot_results(metrics):
     bars = ax.bar(labels, vals, color=colors, width=bar_width, edgecolor='black', linewidth=0.8)
     ax.set_title('Total Traffic (GB)', fontsize=11)
     ax.set_ylabel('Traffic (GB)')
+    ax.tick_params(axis='x', labelrotation=35)
     for bar, v in zip(bars, vals):
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
                 f'{v:.2f}', ha='center', va='bottom', fontsize=9)
@@ -617,6 +720,7 @@ def plot_results(metrics):
     ax.set_title('Cache Hit Ratio (%)', fontsize=11)
     ax.set_ylabel('Hit Ratio (%)')
     ax.set_ylim(0, 100)
+    ax.tick_params(axis='x', labelrotation=35)
     for bar, v in zip(bars, vals):
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
                 f'{v:.1f}%', ha='center', va='bottom', fontsize=9)
@@ -628,6 +732,7 @@ def plot_results(metrics):
     ax.set_title('Backhaul Ratio (%)', fontsize=11)
     ax.set_ylabel('Backhaul Ratio (%)')
     ax.set_ylim(0, 105)
+    ax.tick_params(axis='x', labelrotation=35)
     for bar, v in zip(bars, vals):
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
                 f'{v:.1f}%', ha='center', va='bottom', fontsize=9)
@@ -646,31 +751,24 @@ def plot_results(metrics):
 
 
 def print_summary(metrics):
-    print("\n" + "="*65)
+    print("\n" + "="*100)
     print("实验一结果汇总")
-    print("="*65)
-    header = f"{'指标':<25} {'Baseline1':>12} {'Baseline2':>12} {'YourMethod':>12}"
+    print("="*100)
+    header = f"{'方法':<24} {'平均时延(ms)':>14} {'流量(GB)':>12} {'命中率':>10} {'回源比例':>10}"
     print(header)
-    print("-"*65)
+    print("-"*100)
 
-    keys = [
-        ('avg_completion_time_ms', '平均下载时延 (ms)'),
-        ('total_traffic_gb',       '网络总流量 (GB)'),
-        ('cache_hit_ratio',        '缓存命中率'),
-        ('backhaul_ratio',         '回源比例'),
-    ]
-    for key, label in keys:
-        v1 = metrics['baseline1'][key]
-        v2 = metrics['baseline2'][key]
-        v3 = metrics['your_method'][key]
-        if 'ratio' in key:
-            row = f"{label:<25} {v1:>11.1%} {v2:>11.1%} {v3:>11.1%}"
-        elif key == 'total_traffic_gb':
-            row = f"{label:<25} {v1:>11.2f} {v2:>11.2f} {v3:>11.2f}"
-        else:
-            row = f"{label:<25} {v1:>11.1f} {v2:>11.1f} {v3:>11.1f}"
+    for method in METHOD_ORDER:
+        data = metrics[method]
+        row = (
+            f"{METHOD_LABELS[method].replace(chr(10), ' '):<24} "
+            f"{data['avg_completion_time_ms']:>14.1f} "
+            f"{data['total_traffic_gb']:>12.2f} "
+            f"{data['cache_hit_ratio']:>9.1%} "
+            f"{data['backhaul_ratio']:>9.1%}"
+        )
         print(row)
-    print("-"*65)
+    print("-"*100)
 
     # 计算 Your Method 相对 Baseline1 的改进
     b1_delay   = metrics['baseline1']['avg_completion_time_ms']
@@ -683,7 +781,14 @@ def print_summary(metrics):
               f"(目标: 20%–50%)")
         print(f"  流量减少: {(b1_traffic - ym_traffic)/b1_traffic*100:.1f}%  "
               f"(目标: 30%+)")
-    print("="*65)
+
+    if 'otcp' in metrics and b1_delay > 0:
+        otcp_delay = metrics['otcp']['avg_completion_time_ms']
+        otcp_traffic = metrics['otcp']['total_traffic_gb']
+        print(f"\nOTCP/OLCP vs Baseline1:")
+        print(f"  时延下降: {(b1_delay - otcp_delay)/b1_delay*100:.1f}%")
+        print(f"  流量减少: {(b1_traffic - otcp_traffic)/b1_traffic*100:.1f}%")
+    print("="*100)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -33,16 +33,17 @@ CODE_DIR = os.path.dirname(CODE_FILE_PATH)
 PARENT_DIR = os.path.dirname(CODE_DIR)
 CELESTRAK_STARLINK_TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle" # 星链TLE数据源
 TLE_FILE = os.path.join(CODE_DIR, "starlink.tle") # 本地TLE文件路径
-OUTPUT_DIR = os.path.join(
+OUTPUT_BASE = os.path.join(
     PARENT_DIR,
     "S3",
+    "traces",
     "sat_trace"
-)  # 输出目录
+)  # 输出根目录
 CHUNK_DURATION_SEC = 60  # 每个文件的时间切片（60秒）
 
 # 5. 动态筛选配置
 DYNAMIC_FILTER_INTERVAL_SEC = 60  # 动态筛选时间窗口（每60秒重新筛选一次）
-RESELECT_SAT_COUNT = 25  # 每次动态筛选保留的卫星数
+RESELECT_SAT_COUNT = 40  # 每次动态筛选保留的卫星数
 
 # ======================== 工具函数 ========================
 '''
@@ -264,13 +265,13 @@ def calculate_sat_trajectory(sat_metadata, ts, t0): #旧的轨迹计算
     print(f"📊 完成 {total_steps} 个时间步的轨迹计算，共 {len(all_traces)} 条记录")
     return pd.DataFrame(all_traces)
 
-def split_and_save_csv(trajectory_df):
+def split_and_save_csv(trajectory_df, output_dir):
     """
     按60秒切片保存CSV文件
     文件名格式：sat_trace_{startMs}_{endMs}.csv
     """
     # 创建输出目录（如果不存在）
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     # 计算切片数量
     total_chunks = SIM_DURATION_SEC // CHUNK_DURATION_SEC
@@ -289,8 +290,8 @@ def split_and_save_csv(trajectory_df):
         ]
 
         # 文件名
-        filename = f"sat_trace_{start_ms}_{end_ms}.csv"
-        file_path = os.path.join(OUTPUT_DIR, filename)
+        filename = f"sat_trace_{start_ms}_{end_ms}_{RESELECT_SAT_COUNT}.csv"
+        file_path = os.path.join(output_dir, filename)
 
         # 保存CSV（不保留索引）
         chunk_df.to_csv(file_path, index=False, encoding="utf-8")
@@ -304,12 +305,12 @@ def split_and_save_csv(trajectory_df):
         "sat_count": MAX_SAT_COUNT,
         "trace_files": [
             f"sat_trace_{chunk_idx*CHUNK_DURATION_SEC*MS_PER_SEC}_"
-            f"{(chunk_idx+1)*CHUNK_DURATION_SEC*MS_PER_SEC - 1}.csv"
+            f"{(chunk_idx+1)*CHUNK_DURATION_SEC*MS_PER_SEC - 1}_{RESELECT_SAT_COUNT}.csv"
             for chunk_idx in range(total_chunks)
         ]
     }
     manifest_path = os.path.join(
-        os.path.dirname(OUTPUT_DIR), "manifest.json"
+        os.path.dirname(output_dir), "manifest.json"
     )
     import json
     with open(manifest_path, "w", encoding="utf-8") as f:
@@ -390,7 +391,10 @@ if __name__ == "__main__":
 
         trajectory_df = calculate_dynamic_sat_trajectory(all_starlink_sats, ts, t0, observer)
         validate_trajectory_data(trajectory_df)
-        split_and_save_csv(trajectory_df)
+        output_dir = os.path.join(OUTPUT_BASE, f"sat_trace_{RESELECT_SAT_COUNT}")
+        os.makedirs(output_dir, exist_ok=True)
+        print(f"📁 本次输出目录：{output_dir}")
+        split_and_save_csv(trajectory_df, output_dir)
 
         '''
         # 2. 筛选卫星并生成元数据
@@ -408,7 +412,7 @@ if __name__ == "__main__":
 
         print("\n" + "="*60)
         print("🎉 卫星轨迹生成完成！")
-        print(f"📁 输出目录：{OUTPUT_DIR}")
+        print(f"📁 输出目录：{output_dir}")
         print(f"📦 生成文件数：{SIM_DURATION_SEC // CHUNK_DURATION_SEC} 个CSV切片 + 1个manifest.json")
         print("="*60)
 

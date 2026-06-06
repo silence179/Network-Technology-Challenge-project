@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S4 Network Simulation — UAV-Satellite Communication</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>S4 Network Simulation Engine</h1>
+        <p class="subtitle">UAV-Satellite Communication Network Simulator</p>
+    </header>
+
+    <main>
+        <!-- Upload Section -->
+        <section id="upload-section" class="card">
+            <h2>1. Upload Data Files</h2>
+            <div class="upload-grid">
+                <div class="upload-zone" id="zone-links">
+                    <div class="zone-icon">&#128279;</div>
+                    <h3>Links <span class="required">*</span></h3>
+                    <p class="zone-hint">Topology links CSV</p>
+                    <input type="file" id="file-links" accept=".csv" data-zone="zone-links">
+                    <label for="file-links" class="file-btn">Choose File</label>
+                    <span class="file-name" id="name-links">No file chosen</span>
+                </div>
+                <div class="upload-zone" id="zone-rules">
+                    <div class="zone-icon">&#128221;</div>
+                    <h3>Rules <span class="required">*</span></h3>
+                    <p class="zone-hint">Routing rules JSON</p>
+                    <input type="file" id="file-rules" accept=".json" data-zone="zone-rules">
+                    <label for="file-rules" class="file-btn">Choose File</label>
+                    <span class="file-name" id="name-rules">No file chosen</span>
+                </div>
+                <div class="upload-zone" id="zone-uav">
+                    <div class="zone-icon">&#128745;</div>
+                    <h3>UAV/GS <span class="required">*</span></h3>
+                    <p class="zone-hint">Node info CSV (uav.csv)</p>
+                    <input type="file" id="file-uav" accept=".csv" data-zone="zone-uav">
+                    <label for="file-uav" class="file-btn">Choose File</label>
+                    <span class="file-name" id="name-uav">No file chosen</span>
+                </div>
+                <div class="upload-zone" id="zone-sat">
+                    <div class="zone-icon">&#128225;</div>
+                    <h3>Sats <span class="optional">(opt)</span></h3>
+                    <p class="zone-hint">Satellite trace CSV(s)</p>
+                    <input type="file" id="file-sat" accept=".csv" multiple data-zone="zone-sat">
+                    <label for="file-sat" class="file-btn">Choose Files</label>
+                    <span class="file-name" id="name-sat">No files chosen</span>
+                </div>
+                <div class="upload-zone" id="zone-scenario">
+                    <div class="zone-icon">&#128196;</div>
+                    <h3>Scenario <span class="optional">(opt)</span></h3>
+                    <p class="zone-hint">Traffic scenario .py</p>
+                    <input type="file" id="file-scenario" accept=".py" data-zone="zone-scenario">
+                    <label for="file-scenario" class="file-btn">Choose File</label>
+                    <span class="file-name" id="name-scenario">No file chosen</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Config Section -->
+        <section id="config-section" class="card">
+            <h2>2. Simulation Mode</h2>
+            <div class="mode-selector">
+                <label class="mode-option" id="mode-nx-label">
+                    <input type="radio" name="mode" value="networkx" checked>
+                    <div class="mode-card">
+                        <h3>NetworkX</h3>
+                        <p>Pure Python graph path computation. Fast, cross-platform, no system dependencies.</p>
+                    </div>
+                </label>
+                <label class="mode-option" id="mode-mn-label">
+                    <input type="radio" name="mode" value="mininet">
+                    <div class="mode-card">
+                        <h3>Mininet</h3>
+                        <p>Real network emulation with virtual hosts, switches, and TC links. Requires Linux + root + Mininet.</p>
+                    </div>
+                </label>
+            </div>
+        </section>
+
+        <!-- Run Section -->
+        <section id="run-section" class="card">
+            <h2>3. Run Simulation</h2>
+            <button id="btn-run" class="btn-run">Start Simulation</button>
+            <div id="progress-area" class="hidden">
+                <div class="spinner"></div>
+                <span id="progress-text">Running simulation...</span>
+            </div>
+            <div id="error-area" class="hidden">
+                <pre id="error-text"></pre>
+            </div>
+        </section>
+
+        <!-- Results Section -->
+        <section id="results-section" class="card hidden">
+            <h2>4. Results</h2>
+
+            <div id="summary-cards" class="summary-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-requests">-</div>
+                    <div class="stat-label">Total Requests</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-latency">-</div>
+                    <div class="stat-label">Avg Latency (ms)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-throughput">-</div>
+                    <div class="stat-label">Avg Throughput (Mbps)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-success">-</div>
+                    <div class="stat-label">Success Rate</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-data">-</div>
+                    <div class="stat-label">Total Data (MB)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-maxlat">-</div>
+                    <div class="stat-label">Max Latency (ms)</div>
+                </div>
+            </div>
+
+            <div class="results-toolbar">
+                <input type="text" id="table-filter" placeholder="Filter results...">
+                <button id="btn-download" class="btn-download">Download CSV</button>
+            </div>
+
+            <div class="charts-row">
+                <div class="chart-container">
+                    <h3>Latency Over Time</h3>
+                    <canvas id="chart-latency"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>Throughput Distribution</h3>
+                    <canvas id="chart-throughput"></canvas>
+                </div>
+            </div>
+
+            <div class="table-wrapper">
+                <table id="results-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="time_ms">Time (ms)</th>
+                            <th data-sort="req_id">Req ID</th>
+                            <th data-sort="node_id">Client</th>
+                            <th data-sort="content_id">Content</th>
+                            <th data-sort="file_size_MB">Size (MB)</th>
+                            <th data-sort="algo">Algorithm</th>
+                            <th data-sort="server_node">Server</th>
+                            <th data-sort="latency_ms">Latency (ms)</th>
+                            <th data-sort="throughput_mbps">BW (Mbps)</th>
+                            <th data-sort="download_time">DL Time (ms)</th>
+                            <th data-sort="http_code">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="results-body">
+                    </tbody>
+                </table>
+            </div>
+            <div id="table-info" class="table-info"></div>
+        </section>
+    </main>
+
+    <footer>
+        <p>S4 Network Simulation Engine &copy; 2026</p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

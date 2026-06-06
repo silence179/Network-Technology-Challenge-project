@@ -32,13 +32,30 @@ import os
 import math
 import random
 import json
+import sys
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 TRACES_DIR = os.path.join(SCRIPT_DIR, '..', 'traces')
+
+from algorithms.code import config as content_cfg
+from algorithms.code.project_experiment_bridge import (
+    METHOD_COLORS as EXTRA_METHOD_COLORS,
+    METHOD_LABELS as EXTRA_METHOD_LABELS,
+    SUPPORTED_CONTENT_METHODS,
+    advance_runtime_state,
+    build_snapshot_view,
+    initial_runtime_state,
+    resolve_request,
+    solve_method_placement,
+)
 
 
 def _set_chinese_font():
@@ -59,7 +76,15 @@ MAX_LINK_RANGE = 5000 * 1000
 MIN_ELEVATION  = 10.0
 SPEED_OF_LIGHT = 3e8
 SAT_DIR        = os.path.join(TRACES_DIR, 'sat_trace_100')
-UAV_FILE       = os.path.join(TRACES_DIR, 'uav_trace_full.csv')
+
+
+def _resolve_default_uav_file():
+    preferred = os.path.join(TRACES_DIR, 'uav_trace', 'uav_trace_full.csv')
+    fallback = os.path.join(TRACES_DIR, 'uav_trace_full.csv')
+    return preferred if os.path.exists(preferred) else fallback
+
+
+UAV_FILE       = _resolve_default_uav_file()
 ORIGIN_SERVER  = 'GS_01'
 MAX_STEPS      = 200
 
@@ -82,6 +107,29 @@ PROACTIVE_THRESHOLD = 0.50      # 路径最弱链路稳定性低于此阈值则�
 
 random.seed(42)
 np.random.seed(42)
+
+ORIGINAL_METHODS = ('baseline1', 'baseline2', 'your_method')
+EXTRA_METHODS = tuple(SUPPORTED_CONTENT_METHODS)
+METHOD_ORDER = ORIGINAL_METHODS + EXTRA_METHODS
+METHOD_LABELS = {
+    'baseline1': 'Baseline 1',
+    'baseline2': 'Baseline 2',
+    'your_method': 'Your Method',
+    **EXTRA_METHOD_LABELS,
+}
+METHOD_COLORS = {
+    'baseline1': '#e74c3c',
+    'baseline2': '#f39c12',
+    'your_method': '#2ecc71',
+    **EXTRA_METHOD_COLORS,
+}
+
+CONTENT_PROFILE_LENGTH = 18
+CONTENT_ACTIVE_WINDOW = 6
+CONTENT_SHIFT_INTERVAL = 12
+SHARED_HOTSPOT_INTERVAL = 9
+CONTENT_SERVICE_DEADLINE_MS = 2350.0
+BRIDGE_LOOKAHEAD_HORIZON = 3
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -115,10 +163,27 @@ def elevation_deg(pos_gnd, pos_sat):
 
 
 def load_traces(sat_dir=SAT_DIR, uav_file=UAV_FILE):
+    def resolve_uav_file(path):
+        candidates = [path]
+        basename = os.path.basename(path)
+        parent_dir = os.path.dirname(path)
+        nested_candidate = os.path.join(parent_dir, 'uav_trace', basename)
+        flat_candidate = os.path.join(parent_dir, basename)
+
+        for candidate in (nested_candidate, flat_candidate):
+            if candidate not in candidates:
+                candidates.append(candidate)
+
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                return candidate
+        return path
+
     print(">>> 加载轨迹数据...")
     sat_files = glob.glob(os.path.join(sat_dir, "*.csv"))
     df_sat = pd.concat([pd.read_csv(f) for f in sat_files], ignore_index=True) if sat_files else pd.DataFrame()
-    df_uav = pd.read_csv(uav_file) if os.path.exists(uav_file) else pd.DataFrame()
+    resolved_uav_file = resolve_uav_file(uav_file)
+    df_uav = pd.read_csv(resolved_uav_file) if os.path.exists(resolved_uav_file) else pd.DataFrame()
     timestamps = sorted(df_uav['time_ms'].unique()) if not df_uav.empty else []
     print(f"    卫星文件数: {len(sat_files)}, 时间步数: {len(timestamps)}")
     return df_sat, df_uav, timestamps
@@ -132,6 +197,58 @@ def get_nodes(df_sat, df_uav, t_ms):
     if sat_t.empty and uav_t.empty:
         return pd.DataFrame(columns=cols)
     return pd.concat([sat_t[cols], uav_t[cols]], ignore_index=True)
+
+
+def build_flow_content_profiles(flow_pairs):
+    profiles = {}
+    for flow_index, flow in enumerate(flow_pairs):
+        base = (flow_index * 13) % content_cfg.CONTENT_CATALOG_SIZE
+        stride = 7 + (flow_index % 3) * 2
+        profiles[flow] = [
+            int((base + stride * offset) % content_cfg.CONTENT_CATALOG_SIZE)
+            for offset in range(CONTENT_PROFILE_LENGTH)
+        ]
+    return profiles
+
+
+def build_step_content_requests(flow_pairs, flow_profiles, step_i):
+    request_batch = []
+    content_by_flow = {}
+    phase = step_i // CONTENT_SHIFT_INTERVAL
+    shared_hotspot = int((phase * 5) % content_cfg.CONTENT_CATALOG_SIZE)
+
+    for flow_index, flow in enumerate(flow_pairs):
+        profile = flow_profiles[flow]
+        window_start = (phase * 3 + flow_index * 2) % len(profile)
+        active_window = [
+            profile[(window_start + offset) % len(profile)]
+            for offset in range(CONTENT_ACTIVE_WINDOW)
+        ]
+        selector = (step_i * 5 + flow_index * 3 + phase) % len(active_window)
+        content_id = int(active_window[selector])
+
+        if step_i % SHARED_HOTSPOT_INTERVAL == 0:
+            content_id = shared_hotspot
+        elif step_i % 5 == flow_index % 5:
+            content_id = int(active_window[0])
+
+        content_by_flow[flow] = content_id
+        request_batch.append((flow[0], content_id))
+
+    return request_batch, content_by_flow
+
+
+def build_future_content_snapshots(df_sat, df_uav, timestamps, start_idx, horizon):
+    snapshots = []
+    for index in range(start_idx + 1, min(start_idx + horizon + 1, len(timestamps))):
+        nodes_df = get_nodes(df_sat, df_uav, int(timestamps[index]))
+        if nodes_df.empty:
+            continue
+        graph, _, type_map = build_topology_graph(nodes_df)
+        if len(graph.nodes) < 2:
+            continue
+        snapshots.append(build_snapshot_view(graph, type_map))
+    return snapshots
 
 
 def build_topology_graph(nodes_df):
@@ -531,19 +648,22 @@ def run_experiment():
     algo_b1 = AlgoBaseline1()
     algo_b2 = AlgoBaseline2()
     algo_ym = AlgoYourMethod(tracker)
+    extra_states = {method: initial_runtime_state(method) for method in EXTRA_METHODS}
+    extra_prev_paths = {method: {} for method in EXTRA_METHODS}
 
     method_names = ['baseline1', 'baseline2', 'your_method']
     algos = [algo_b1, algo_b2, algo_ym]
 
     stats = {m: {'flaps': 0, 'ok': 0, 'fail': 0,
-                  'delays': [], 'delay_ts': [],
-                  'flow_delay_steps': {},  # {flow_key: [(step_i, delay), ...]}
-                  'recovery_times': []}
-             for m in method_names}
+                 'delays': [], 'delay_ts': [],
+                 'flow_delay_steps': {},  # {flow_key: [(step_i, delay), ...]}
+                 'recovery_times': []}
+             for m in METHOD_ORDER}
     # 恢复状态 {method: {flow: fail_step}}
-    rec_state = {m: {} for m in method_names}
+    rec_state = {m: {} for m in METHOD_ORDER}
 
     flow_pairs = None
+    flow_content_profiles = {}
 
     for step_i, t_ms in enumerate(timestamps):
         if step_i % 50 == 0:
@@ -563,8 +683,30 @@ def run_experiment():
         if flow_pairs is None:
             uavs = sorted([n for n, t in type_map.items() if t == 'UAV' and G.has_node(n)])
             flow_pairs = [(u, ORIGIN_SERVER) for u in uavs[:5]]
+            flow_content_profiles = build_flow_content_profiles(flow_pairs)
             if not flow_pairs:
                 continue
+
+        content_requests, content_by_flow = build_step_content_requests(flow_pairs, flow_content_profiles, step_i)
+        current_snapshot = build_snapshot_view(G, type_map)
+        future_snapshots = [current_snapshot] + build_future_content_snapshots(
+            df_sat,
+            df_uav,
+            timestamps,
+            step_i,
+            BRIDGE_LOOKAHEAD_HORIZON,
+        )
+
+        extra_placements = {}
+        for method in EXTRA_METHODS:
+            placement, _ = solve_method_placement(
+                method,
+                step_i,
+                future_snapshots,
+                extra_states[method],
+                request_batch=content_requests,
+            )
+            extra_placements[method] = placement
 
         for src, dst in flow_pairs:
             for m, algo in zip(method_names, algos):
@@ -591,6 +733,54 @@ def run_experiment():
                 stats[m]['fail'] += 1
                 if fk not in rec_state[m]:
                     rec_state[m][fk] = step_i
+
+            content_id = content_by_flow[(src, dst)]
+            fk = (src, dst)
+            for method in EXTRA_METHODS:
+                response = resolve_request(
+                    method,
+                    G,
+                    src,
+                    content_id,
+                    type_map,
+                    extra_placements[method],
+                    extra_states[method],
+                )
+                previous_path = extra_prev_paths[method].get(fk)
+                is_timely = (
+                    response['success']
+                    and response['delay_ms'] is not None
+                    and float(response['delay_ms']) <= CONTENT_SERVICE_DEADLINE_MS
+                )
+                path = response['path'] if is_timely else None
+                flap = previous_path is not None and (path is None or path != previous_path)
+                if flap:
+                    stats[method]['flaps'] += 1
+
+                if path is not None:
+                    delay_ms = float(response['delay_ms'])
+                    stats[method]['ok'] += 1
+                    stats[method]['delays'].append(delay_ms)
+                    stats[method]['delay_ts'].append((step_i, delay_ms))
+                    stats[method]['flow_delay_steps'].setdefault(fk, []).append((step_i, delay_ms))
+                    extra_prev_paths[method][fk] = path
+                    if fk in rec_state[method]:
+                        fail_s = rec_state[method].pop(fk)
+                        stats[method]['recovery_times'].append(step_i - fail_s)
+                else:
+                    stats[method]['fail'] += 1
+                    extra_prev_paths[method].pop(fk, None)
+                    if fk not in rec_state[method]:
+                        rec_state[method][fk] = step_i
+
+        for method in EXTRA_METHODS:
+            advance_runtime_state(
+                method,
+                current_snapshot,
+                content_requests,
+                extra_placements[method],
+                extra_states[method],
+            )
 
     return stats
 
@@ -641,13 +831,12 @@ def compute_summary(stats):
 # 输出
 # ═══════════════════════════════════════════════════════════════════════
 def plot_results(summary, stats):
-    methods = ['baseline1', 'baseline2', 'your_method']
-    labels = ['Baseline 1\n(Static Dijkstra)', 'Baseline 2\n(Reactive Reroute)',
-              'Your Method\n(Stability-Aware)']
-    colors = ['#e74c3c', '#f39c12', '#2ecc71']
+    methods = list(METHOD_ORDER)
+    labels = [METHOD_LABELS[m] for m in methods]
+    colors = [METHOD_COLORS[m] for m in methods]
     bw = 0.5
 
-    fig, axes = plt.subplots(2, 2, figsize=(13, 10))
+    fig, axes = plt.subplots(2, 2, figsize=(18, 10))
     fig.suptitle('Experiment 2: Dynamic Topology Stability Validation\n'
                  '(Satellite Movement + UAV Dropout + Correlated Link Failures)',
                  fontsize=13, fontweight='bold')
@@ -656,6 +845,7 @@ def plot_results(summary, stats):
         bars = ax.bar(labels, vals, color=colors, width=bw, edgecolor='black', lw=0.8)
         ax.set_title(title, fontsize=11)
         ax.set_ylabel(ylabel)
+        ax.tick_params(axis='x', labelrotation=35)
         for bar, v in zip(bars, vals):
             if fmt == 'd':
                 txt = f'{v}'
@@ -665,7 +855,7 @@ def plot_results(summary, stats):
                 txt = f'{v:.1f}%'
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + max(vals) * 0.01,
                     txt, ha='center', va='bottom', fontsize=9)
-        if annotate_reduction and vals[0] > 0:
+        if annotate_reduction and len(vals) >= 3 and vals[0] > 0:
             red = (vals[0] - vals[2]) / vals[0] * 100
             sym = '\u2193' if red > 0 else '\u2191'
             ax.annotate(f'{sym}{abs(red):.1f}%', xy=(2, vals[2]),
@@ -684,10 +874,11 @@ def plot_results(summary, stats):
     axes[0, 1].set_title('Task Success Rate (%)', fontsize=11)
     axes[0, 1].set_ylabel('Success Rate (%)')
     axes[0, 1].set_ylim(0, 105)
+    axes[0, 1].tick_params(axis='x', labelrotation=35)
     for bar, v in zip(bars, sr):
         axes[0, 1].text(bar.get_x() + bar.get_width() / 2, v + 0.5,
                          f'{v:.1f}%', ha='center', va='bottom', fontsize=9)
-    if sr[2] > sr[0]:
+    if len(sr) >= 3 and sr[2] > sr[0]:
         axes[0, 1].annotate(f'\u2191+{sr[2] - sr[0]:.1f}pp', xy=(2, sr[2]),
                              xytext=(0.8, max(sr) * 0.85),
                              arrowprops=dict(arrowstyle='->', color='green'),
@@ -709,52 +900,136 @@ def plot_results(summary, stats):
     print(f">>> 图表已保存: {out}")
     plt.close()
 
-    # 时序图
-    fig2, ax2 = plt.subplots(figsize=(14, 5))
-    for m, c, lab in zip(methods, colors,
-                          ['Baseline 1', 'Baseline 2', 'Your Method']):
-        data = stats[m]['delay_ts']
-        if data:
-            steps, delays = zip(*data)
-            win = min(10, len(delays))
-            sm = np.convolve(delays, np.ones(win) / win, mode='valid')
-            ax2.plot(range(len(sm)), sm, color=c, label=lab, alpha=0.8, lw=1.2)
-    ax2.set_title('Delay Over Time (Smoothed)', fontsize=12, fontweight='bold')
-    ax2.set_xlabel('Sample Index')
-    ax2.set_ylabel('Delay (ms)')
-    ax2.legend(fontsize=9)
-    ax2.grid(True, alpha=0.3)
-    ax2.axvline(x=PERTURBATION_START * 5, color='gray', ls='--', alpha=0.5)
-    ax2.text(PERTURBATION_START * 5 + 2, ax2.get_ylim()[1] * 0.9,
-             'Perturbations Start', fontsize=8, color='gray')
+    # 时序图：按真实时间步对齐，并分开原始方法族与新增内容方法族
+    flow_count = max((len(stats[m]['flow_delay_steps']) for m in methods), default=1)
+    total_requests = max((summary[m]['total_requests'] for m in methods), default=0)
+    step_count = max(total_requests // max(flow_count, 1), PERTURBATION_START + 5)
+
+    def _build_step_delay_series(method):
+        per_step_delays = [[] for _ in range(step_count)]
+        for step_i, delay_ms in stats[method]['delay_ts']:
+            if 0 <= step_i < step_count:
+                per_step_delays[step_i].append(float(delay_ms))
+        values = [float(np.mean(items)) if items else np.nan for items in per_step_delays]
+        return pd.Series(values, dtype=float).rolling(window=5, min_periods=1).mean()
+
+    def _set_dynamic_ylim(axis, series_list):
+        finite = []
+        for series in series_list:
+            arr = series.to_numpy(dtype=float)
+            finite.extend(arr[np.isfinite(arr)])
+        if not finite:
+            return
+        low = float(np.min(finite))
+        high = float(np.max(finite))
+        span = high - low
+        if math.isclose(span, 0.0):
+            pad = max(abs(low) * 0.05, 0.05)
+        else:
+            pad = max(span * 0.18, 0.05)
+        axis.set_ylim(max(0.0, low - pad), high + pad)
+
+    step_axis = np.arange(step_count)
+    original_series = {method: _build_step_delay_series(method) for method in ORIGINAL_METHODS}
+    extra_series = {method: _build_step_delay_series(method) for method in EXTRA_METHODS}
+    extra_reference = min(
+        (
+            float(np.nanmin(series.to_numpy(dtype=float)))
+            for series in extra_series.values()
+            if np.isfinite(series.to_numpy(dtype=float)).any()
+        ),
+        default=0.0,
+    )
+    extra_residual_series = {
+        method: series - extra_reference
+        for method, series in extra_series.items()
+    }
+
+    fig2, (ax_top, ax_bottom) = plt.subplots(
+        2,
+        1,
+        figsize=(14, 8),
+        sharex=True,
+        gridspec_kw={'height_ratios': [1, 1.3]},
+    )
+    fig2.suptitle(
+        'Delay Over Time by Method Family\n'
+        '(5-step rolling mean of per-step successful deliveries; gaps mean no successful samples)',
+        fontsize=12,
+        fontweight='bold',
+    )
+
+    for method in ORIGINAL_METHODS:
+        ax_top.plot(
+            step_axis,
+            original_series[method],
+            color=METHOD_COLORS[method],
+            label=METHOD_LABELS[method],
+            linewidth=2.0,
+            alpha=0.9,
+        )
+
+    for method in EXTRA_METHODS:
+        ax_bottom.plot(
+            step_axis,
+            extra_residual_series[method],
+            color=METHOD_COLORS[method],
+            label=METHOD_LABELS[method],
+            linewidth=1.8,
+            alpha=0.9,
+        )
+
+    ax_top.set_title('Original Stability Methods', fontsize=11)
+    ax_top.set_ylabel('Delay (ms)')
+    ax_top.grid(True, alpha=0.3)
+    ax_top.legend(fontsize=9, ncol=3, loc='upper right')
+    _set_dynamic_ylim(ax_top, list(original_series.values()))
+
+    ax_bottom.set_title(
+        f'Added Content / Placement Baselines (delay relative to {extra_reference:.2f} ms)',
+        fontsize=11,
+    )
+    ax_bottom.set_xlabel('Time Step')
+    ax_bottom.set_ylabel('Excess Delay (ms)')
+    ax_bottom.grid(True, alpha=0.3)
+    ax_bottom.legend(fontsize=8, ncol=4, loc='upper right')
+    _set_dynamic_ylim(ax_bottom, list(extra_residual_series.values()))
+
+    for axis in (ax_top, ax_bottom):
+        axis.axvline(x=PERTURBATION_START, color='gray', linestyle='--', alpha=0.5)
+    top_ylim = ax_top.get_ylim()
+    ax_top.text(
+        PERTURBATION_START + 1,
+        top_ylim[1] - (top_ylim[1] - top_ylim[0]) * 0.12,
+        'Perturbations Start',
+        fontsize=8,
+        color='gray',
+    )
+
+    fig2.tight_layout(rect=[0, 0, 1, 0.96])
     out2 = os.path.join(SCRIPT_DIR, 'experiment2_delay_timeline.png')
-    plt.savefig(out2, dpi=150, bbox_inches='tight')
+    fig2.savefig(out2, dpi=150, bbox_inches='tight')
     print(f">>> 时序图已保存: {out2}")
-    plt.close()
+    plt.close(fig2)
 
 
 def print_summary(summary):
-    print("\n" + "=" * 75)
+    print("\n" + "=" * 96)
     print("实验二结果汇总 — 动态拓扑稳定性验证")
-    print("=" * 75)
-    print(f"{'指标':<28} {'Baseline1':>12} {'Baseline2':>12} {'YourMethod':>12}")
-    print("-" * 75)
-    keys = [
-        ('route_flaps',        '路由重构次数 (Flaps)',    'd'),
-        ('success_rate',       '任务完成率',              '%'),
-        ('jitter_ms',          '时延抖动 (ms)',          'f'),
-        ('avg_recovery_steps', '平均恢复时间 (steps)',    'f'),
-        ('avg_delay_ms',       '平均时延 (ms)',          'f'),
-    ]
-    for k, label, fmt in keys:
-        v = [summary[m][k] for m in ['baseline1', 'baseline2', 'your_method']]
-        if fmt == 'd':
-            print(f"{label:<28} {v[0]:>11d} {v[1]:>11d} {v[2]:>11d}")
-        elif fmt == '%':
-            print(f"{label:<28} {v[0]:>11.1%} {v[1]:>11.1%} {v[2]:>11.1%}")
-        else:
-            print(f"{label:<28} {v[0]:>11.2f} {v[1]:>11.2f} {v[2]:>11.2f}")
-    print("-" * 75)
+    print("=" * 96)
+    print(f"{'方法':<22} {'Flaps':>8} {'成功率':>10} {'抖动(ms)':>12} {'恢复步数':>12} {'平均时延(ms)':>14}")
+    print("-" * 96)
+    for method in METHOD_ORDER:
+        data = summary[method]
+        print(
+            f"{METHOD_LABELS[method]:<22} "
+            f"{data['route_flaps']:>8d} "
+            f"{data['success_rate']:>9.1%} "
+            f"{data['jitter_ms']:>12.2f} "
+            f"{data['avg_recovery_steps']:>12.2f} "
+            f"{data['avg_delay_ms']:>14.2f}"
+        )
+    print("-" * 96)
 
     b1, ym = summary['baseline1'], summary['your_method']
     print("\nYour Method vs Baseline1:")
@@ -766,7 +1041,13 @@ def print_summary(summary):
         print(f"  恢复加速:     {(b1['avg_recovery_steps'] - ym['avg_recovery_steps']) / b1['avg_recovery_steps'] * 100:.1f}%")
     sr_diff = ym['success_rate'] - b1['success_rate']
     print(f"  成功率提升:   +{sr_diff * 100:.1f}pp")
-    print("=" * 75)
+
+    if 'otcp' in summary and b1['route_flaps'] > 0:
+        otcp = summary['otcp']
+        print("\nOTCP/OLCP vs Baseline1:")
+        print(f"  路由切换减少: {(b1['route_flaps'] - otcp['route_flaps']) / b1['route_flaps'] * 100:.1f}%")
+        print(f"  成功率提升:   +{(otcp['success_rate'] - b1['success_rate']) * 100:.1f}pp")
+    print("=" * 96)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,42 @@
+{
+  "0": {
+    "avg_delay_ms": 2475.477534899761,
+    "total_traffic_gb": 18.0078125,
+    "hit_rate": 0.890625,
+    "backhaul_rate": 0.109375,
+    "solve_time_ms": 1728.346347808838,
+    "avg_diversity": 80.76
+  },
+  "1": {
+    "avg_delay_ms": 2412.134954679449,
+    "total_traffic_gb": 17.978515625,
+    "hit_rate": 0.9275,
+    "backhaul_rate": 0.07250000000000001,
+    "solve_time_ms": 4719.181776046753,
+    "avg_diversity": 86.56
+  },
+  "3": {
+    "avg_delay_ms": 2334.8495166022617,
+    "total_traffic_gb": 17.94921875,
+    "hit_rate": 0.9725,
+    "backhaul_rate": 0.02749999999999997,
+    "solve_time_ms": 14837.982892990112,
+    "avg_diversity": 94.8
+  },
+  "5": {
+    "avg_delay_ms": 2298.3612454618046,
+    "total_traffic_gb": 18.095703125,
+    "hit_rate": 0.99375,
+    "backhaul_rate": 0.006249999999999978,
+    "solve_time_ms": 26468.324899673462,
+    "avg_diversity": 98.84
+  },
+  "8": {
+    "avg_delay_ms": 2287.6507664230176,
+    "total_traffic_gb": 18.26171875,
+    "hit_rate": 1.0,
+    "backhaul_rate": 0.0,
+    "solve_time_ms": 62893.47338676453,
+    "avg_diversity": 99.92
+  }
+}

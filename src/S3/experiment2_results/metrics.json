@@ -1,29 +1,101 @@
 {
   "baseline1": {
-    "route_flaps": 673,
-    "success_rate": 0.353,
-    "avg_delay_ms": 3.4886996839984032,
-    "jitter_ms": 2.7477681413197983,
-    "avg_recovery_steps": 3.3177083333333335,
-    "max_recovery_steps": 22,
-    "total_requests": 1000
-  },
-  "baseline2": {
-    "route_flaps": 421,
-    "success_rate": 0.416,
-    "avg_delay_ms": 3.3330355825992064,
-    "jitter_ms": 2.065493042224763,
-    "avg_recovery_steps": 3.2670454545454546,
+    "route_flaps": 569,
+    "success_rate": 0.291,
+    "avg_delay_ms": 3.6364291034181684,
+    "jitter_ms": 4.753234547517043,
+    "avg_recovery_steps": 3.977401129943503,
     "max_recovery_steps": 20,
     "total_requests": 1000
   },
+  "baseline2": {
+    "route_flaps": 425,
+    "success_rate": 0.306,
+    "avg_delay_ms": 3.3781965112577255,
+    "jitter_ms": 3.6057974704224423,
+    "avg_recovery_steps": 4.435064935064935,
+    "max_recovery_steps": 26,
+    "total_requests": 1000
+  },
   "your_method": {
-    "route_flaps": 376,
-    "success_rate": 0.735,
-    "avg_delay_ms": 3.8434627060590008,
-    "jitter_ms": 1.0410128622582506,
-    "avg_recovery_steps": 2.9431818181818183,
-    "max_recovery_steps": 17,
+    "route_flaps": 373,
+    "success_rate": 0.607,
+    "avg_delay_ms": 4.206154891781384,
+    "jitter_ms": 1.5077384914727918,
+    "avg_recovery_steps": 2.6283783783783785,
+    "max_recovery_steps": 18,
+    "total_requests": 1000
+  },
+  "nocache": {
+    "route_flaps": 0,
+    "success_rate": 0.0,
+    "avg_delay_ms": 0.0,
+    "jitter_ms": 0.0,
+    "avg_recovery_steps": 0.0,
+    "max_recovery_steps": 0,
+    "total_requests": 1000
+  },
+  "lce_lru": {
+    "route_flaps": 143,
+    "success_rate": 0.146,
+    "avg_delay_ms": 2287.6299354822977,
+    "jitter_ms": 4.710038605299059,
+    "avg_recovery_steps": 6.892561983471074,
+    "max_recovery_steps": 27,
+    "total_requests": 1000
+  },
+  "greedy": {
+    "route_flaps": 136,
+    "success_rate": 0.146,
+    "avg_delay_ms": 2287.2949391868447,
+    "jitter_ms": 1.1194087825611345,
+    "avg_recovery_steps": 6.479674796747967,
+    "max_recovery_steps": 22,
+    "total_requests": 1000
+  },
+  "madrl": {
+    "route_flaps": 318,
+    "success_rate": 0.33,
+    "avg_delay_ms": 2287.8866885364982,
+    "jitter_ms": 3.518800141065886,
+    "avg_recovery_steps": 3.4444444444444446,
+    "max_recovery_steps": 20,
+    "total_requests": 1000
+  },
+  "submod": {
+    "route_flaps": 592,
+    "success_rate": 0.623,
+    "avg_delay_ms": 2287.8625079561875,
+    "jitter_ms": 2.009144313906538,
+    "avg_recovery_steps": 2.1436781609195403,
+    "max_recovery_steps": 15,
+    "total_requests": 1000
+  },
+  "spacecache": {
+    "route_flaps": 530,
+    "success_rate": 0.562,
+    "avg_delay_ms": 2287.75826415476,
+    "jitter_ms": 1.6422455113222973,
+    "avg_recovery_steps": 2.281081081081081,
+    "max_recovery_steps": 18,
+    "total_requests": 1000
+  },
+  "myopic": {
+    "route_flaps": 611,
+    "success_rate": 0.638,
+    "avg_delay_ms": 2287.7615155847348,
+    "jitter_ms": 2.1828999503113757,
+    "avg_recovery_steps": 2.25,
+    "max_recovery_steps": 15,
+    "total_requests": 1000
+  },
+  "otcp": {
+    "route_flaps": 420,
+    "success_rate": 0.751,
+    "avg_delay_ms": 2287.2227931472576,
+    "jitter_ms": 0.1484759740556349,
+    "avg_recovery_steps": 2.5789473684210527,
+    "max_recovery_steps": 15,
     "total_requests": 1000
   }
 }

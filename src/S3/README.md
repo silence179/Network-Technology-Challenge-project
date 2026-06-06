@@ -2,21 +2,43 @@
 
 本项目已按功能重新整理目录，并将默认入口切换为优化版本。
 
+当前仓库有三类实验入口：
+
+- 原始场景实验：`experiment0_results/` 到 `experiment3_results/`
+- 路由横评：`algorithms/s3_routing_core.py` 与 `algorithms/benchmark_algorithms.py`
+- OTCP / cache 放置实验：`algorithms/code/experiment.py`
+
+当前代码状态下：
+
+- Experiment 0 仍保持 A/B/C 三种建模深度的 reality gap 验证
+- Experiment 1 已原生接入新增 8 个内容/缓存 baseline，与原始 3 个方法一起比较
+- Experiment 2、3 也已通过 `algorithms/code/project_experiment_bridge.py` 将新增 8 个 baseline 接入原始脚本
+- `run_all_project_experiments.py` 仍可用于项目级统一重跑
+
 ## 目录结构
 
 ```text
 s3/
 ├─ s3.py                          # 主入口（已替换为 optimized）
 ├─ README.md
-├─ algorithms/                    # 六算法与统一仿真核心
+├─ algorithms/                    # 路由基线 + cache/placement baseline
 │  ├─ s3_routing_core.py
 │  ├─ s3_optimized.py
 │  ├─ s3_hypatia.py
 │  ├─ s3_lsr.py
 │  ├─ s3_madrl.py
+│  ├─ s3_otcp.py
 │  ├─ s3_ftrl.py
 │  ├─ s3_dtn_cgr.py
-│  └─ benchmark_algorithms.py     # 六算法横评脚本
+│  ├─ benchmark_algorithms.py     # 七路由算法横评脚本
+│  └─ code/                       # OTCP/cache baseline 套件 + 实验桥接层
+├─ experiment0_results/           # Experiment 0: reality gap validation
+├─ experiment1_results/           # Experiment 1: cache-routing synergy
+├─ experiment2_results/           # Experiment 2: topology stability
+├─ experiment3_results/           # Experiment 3: UAV relay
+├─ figures/                       # OTCP 与其他实验图表
+├─ results/                       # OTCP 与总控清单结果
+├─ run_all_project_experiments.py # 项目级全量实验入口
 ├─ traces/                        # 全部轨迹数据
 │  ├─ sat_trace/
 │  ├─ sat_trace_50/
@@ -55,7 +77,7 @@ python s3.py
 python algorithms/s3_hypatia.py
 ```
 
-### 3) 六算法横评
+### 3) 七路由算法横评
 
 ```bash
 python algorithms/benchmark_algorithms.py
@@ -67,15 +89,86 @@ python algorithms/benchmark_algorithms.py
 python algorithms/benchmark_algorithms.py traces/sat_trace_100 --max-steps 300 --save-outputs
 ```
 
+### 3.1) 40 星 / 50 UAV / 每 10 秒照片上报场景
+
+如果要运行你新增的 `sat_trace_40` + `uav_trace_50` 场景，并把每架 UAV 建模成“每 10 秒向 `GS_01` 发送一张 12 MB 照片”，可以直接使用：
+
+```bash
+python algorithms/s3_optimized.py traces/sat_trace_40 --uav-file traces/uav_trace_50 --traffic-model photo --photo-interval-s 10 --photo-size-mb 12 --no-ctrl-flow --output-tag sat40_uav50_photo10s
+```
+
+如果要对 7 个路由算法做同场景横评：
+
+```bash
+python algorithms/benchmark_algorithms.py traces/sat_trace_40 --uav-file traces/uav_trace_50 --traffic-model photo --photo-interval-s 10 --photo-size-mb 12 --no-ctrl-flow --max-steps 6000 --save-outputs --output-dir outputs/benchmark_sat40_uav50_photo10s
+```
+
+说明：
+
+- `--uav-file` 现在既可以传单个 CSV，也可以直接传 UAV trace 目录
+- `--traffic-model photo` 会在 `t = 0, 10, 20, ..., 590s` 为每架在线 UAV 生成一条照片上报请求
+- `12 MB / 10 s` 会被换算为规则里的 `req_bw_mbps = 9.6`
+- `--output-tag` 会直接进入输出目录名，避免覆盖旧场景
+
+### 4) 原始实验 1/2/3（已集成 11 方法）
+
+```bash
+python experiment1_results/experiment1_cache_routing.py
+python experiment2_results/experiment2_topology_stability.py
+python experiment3_results/experiment3_uav_relay.py
+```
+
+说明：
+
+- 这三个脚本都会输出包含原始 3 个方法和新增 8 个 baseline 的 `metrics.json`
+- Experiment 1 是原生内容/缓存场景，跨方法指标最直接可比
+- Experiment 2、3 中新增 baseline 通过桥接层适配到原始场景，成功率/恢复类指标最适合跨族比较
+
+### 5) OTCP / cache baseline 主实验
+
+```bash
+python -m code.experiment --mode main --sat-dir traces/sat_trace_100 --max-steps 100
+```
+
+说明：该命令需要在 `algorithms/` 目录内执行；若在项目根目录统一调度，推荐直接使用总控脚本。
+
+### 6) 全量重跑项目实验
+
+```bash
+python run_all_project_experiments.py
+```
+
+只重跑新增 cache baseline 套件：
+
+```bash
+python run_all_project_experiments.py --only otcp --otcp-mode all --otcp-max-steps 100
+```
+
 ## 主要输出位置
 
+- 原始实验集成结果：
+  - `experiment1_results/metrics.json`
+  - `experiment2_results/metrics.json`
+  - `experiment3_results/metrics.json`
+- 原始实验图表：各自实验目录下的 `experiment*_comparison.png` / `timeline` 图
 - 单算法输出：`outputs/output_<sat_count>/`（例如 `output_25`、`output_50`）
 - 横评汇总：`outputs/benchmark_results/`
   - `algorithm_benchmark.csv`
   - `algorithm_benchmark.json`
   - `algorithm_benchmark.png`
+- OTCP/cache baseline 图表：`figures/`
+- OTCP/cache baseline 指标与总控清单：`results/`
+  - `metrics.json`
+  - `project_experiment_manifest.json`
+
+## 导出手册
+
+- `links` / `rules` 的生成与导出操作手册见：`docs/Link_Rule_Export_Manual.md`
+- 这份手册包含：新场景运行命令、`links`/`rules` 字段解释、分块规则、以及导出到下游模块时的目录组织建议
 
 ## 备注
 
 - 若使用 Windows 且命令 `python` 指向不一致，请改用你本机解释器完整路径。
 - `test/` 目录保留为对照与复现材料，不参与当前主流程。
+- `algorithms/code/experiment.py` 仍是 OTCP/cache baseline 的原生评测入口；若要看最严格的内容放置指标，优先用它。
+- `experiment2_results/` 和 `experiment3_results/` 中的新增 baseline 是通过桥接层适配到原始场景的，因此成功率、可恢复性、可服务性更适合作为跨族主比较项；绝对时延/流量仍保留各自实现的原生语义。

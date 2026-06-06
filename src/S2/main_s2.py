@@ -1,8 +1,12 @@
 import os
+import sys
 import csv
 import math
 import random
 from pymap3d import enu2ecef  # 用于将站心坐标系(ENU)转换为地心轴坐标系(ECEF)
+
+# 将 SAREnv 目录加入搜寻路径，使 main_s2.py 可放在 S2/ 下执行
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "SAREnv"))
 
 import sarenv
 from sarenv.analytics.paths import generate_spiral_path  # 专门用于搜救场景的螺旋路径生成函数
@@ -14,7 +18,7 @@ ANCHOR_LAT = 30
 ANCHOR_LON = 104 
 ANCHOR_ALT = 459
 
-NUM_UAVS = 3               # 无人机数量
+NUM_UAVS = 50               # 无人机数量
 SEARCH_RADIUS_M = 2500     # 搜索覆盖半径 2.5km
 ALTITUDE_M = 50            # 飞行相对高度 50m
 DETECTION_RANGE_M = 60     # 无人机传感器检测半径
@@ -103,63 +107,87 @@ print("[S3] 计算平滑飞行轨迹...")
 uav_results = [process_uav_mission(p, victims_enu) for p in spiral_paths]
 
 # -------------------------
-# 5. 生成切片 CSV 文件 (Export Data)
+# 5. 导出切片 CSV (Export Data)
 # -------------------------
 
-# 【修改点】获取当前脚本的绝对路径，并向上退两级定位到根目录，然后再进入 S3/uav_trace
+# 获取当前脚本的绝对路径，向上退一级到 src，再进入 S3/traces/uav_trace
 current_dir = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.abspath(os.path.join(current_dir, "..", "S3", "uav_trace"))
+OUTPUT_BASE = os.path.abspath(os.path.join(current_dir, "..", "S3", "traces", "uav_trace"))
 
-# 确保目标文件夹存在
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
+CHUNK_DURATION_MS = 60000  # 每个切片 60 秒
 GS_ECEF = enu2ecef(0, 0, 0, ANCHOR_LAT, ANCHOR_LON, ANCHOR_ALT, deg=True)
-
-# 定义切片时长为 60 秒 (60,000 ms)
-CHUNK_DURATION_MS = 60000  
-
-print(f"[S4] 正在导出切片 CSV 至: {OUTPUT_DIR}")
-
 fieldnames = ["time_ms", "node_id", "role", "type", "ecef_x", "ecef_y", "ecef_z", "ip", "heading_deg", "battery_pct"]
 
-# 按照 60 秒进行循环切片
-for chunk_start in range(0, TOTAL_DURATION_MS, CHUNK_DURATION_MS):
-    # 计算当前切片的结束时间，例如 0 ~ 59999
-    chunk_end = min(chunk_start + CHUNK_DURATION_MS - 1, TOTAL_DURATION_MS - 1)
-    
-    filename = f"uav_trace_{chunk_start}_{chunk_end}.csv"
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        
-        # 遍历当前 60 秒切片内的时间戳
-        for t in range(chunk_start, chunk_start + CHUNK_DURATION_MS, TIME_STEP_MS):
-            if t >= TOTAL_DURATION_MS:
-                break
-                
-            # 1. 地面站
-            writer.writerow({
-                "time_ms": t, "node_id": "GS_01", "role": "CLIENT", "type": "GS",
-                "ecef_x": round(GS_ECEF[0], 1), "ecef_y": round(GS_ECEF[1], 1), "ecef_z": round(GS_ECEF[2], 1),
-                "ip": "10.0.0.1", "heading_deg": -1.0, "battery_pct": -1
-            })
-            
-            # 2. 三架无人机
-            for i in range(NUM_UAVS):
-                traj, _ = uav_results[i]
-                
-                # 获取位置信息
-                ux, uy, uh, urole = traj[t]
-                ex, ey, ez = enu2ecef(ux, uy, ALTITUDE_M, ANCHOR_LAT, ANCHOR_LON, ANCHOR_ALT, deg=True)
-                batt = round(max(0.0, 100 - (t / 1000 * 0.1)), 1)
-                
+
+def split_and_save_uav_csv(uav_results, output_dir):
+    """按60秒切片保存 UAV CSV，并生成 manifest.json"""
+    os.makedirs(output_dir, exist_ok=True)
+    total_chunks = TOTAL_DURATION_MS // CHUNK_DURATION_MS
+
+    for chunk_idx in range(total_chunks):
+        chunk_start = chunk_idx * CHUNK_DURATION_MS
+        chunk_end = min(chunk_start + CHUNK_DURATION_MS - 1, TOTAL_DURATION_MS - 1)
+
+        filename = f"uav_trace_{chunk_start}_{chunk_end}_{NUM_UAVS}.csv"
+        filepath = os.path.join(output_dir, filename)
+
+        with open(filepath, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for t in range(chunk_start, chunk_start + CHUNK_DURATION_MS, TIME_STEP_MS):
+                if t >= TOTAL_DURATION_MS:
+                    break
+
+                # 地面站
                 writer.writerow({
-                    "time_ms": t, "node_id": f"UAV_{i+1:02d}", "role": urole, "type": "UAV",
-                    "ecef_x": round(ex, 1), "ecef_y": round(ey, 1), "ecef_z": round(ez, 1),
-                    "ip": f"10.0.0.{2+i}", "heading_deg": round(uh, 1), "battery_pct": batt
+                    "time_ms": t, "node_id": "GS_01", "role": "CLIENT", "type": "GS",
+                    "ecef_x": round(GS_ECEF[0], 1), "ecef_y": round(GS_ECEF[1], 1), "ecef_z": round(GS_ECEF[2], 1),
+                    "ip": "10.0.0.1", "heading_deg": -1.0, "battery_pct": -1
                 })
+
+                # 无人机
+                for i in range(NUM_UAVS):
+                    traj, _ = uav_results[i]
+                    ux, uy, uh, urole = traj[t]
+                    ex, ey, ez = enu2ecef(ux, uy, ALTITUDE_M, ANCHOR_LAT, ANCHOR_LON, ANCHOR_ALT, deg=True)
+                    batt = round(max(0.0, 100 - (t / 1000 * 0.1)), 1)
+
+                    writer.writerow({
+                        "time_ms": t, "node_id": f"UAV_{i+1:02d}", "role": urole, "type": "UAV",
+                        "ecef_x": round(ex, 1), "ecef_y": round(ey, 1), "ecef_z": round(ez, 1),
+                        "ip": f"10.0.0.{2+i}", "heading_deg": round(uh, 1), "battery_pct": batt
+                    })
+
+        print(f"💾 保存切片文件：{filename}")
+
+    # 生成 manifest.json
+    manifest = {
+        "scenario_name": "rescue_mission_2026_v1",
+        "anchor_lat": ANCHOR_LAT,
+        "anchor_lon": ANCHOR_LON,
+        "anchor_alt": ANCHOR_ALT,
+        "sim_duration_ms": TOTAL_DURATION_MS,
+        "uav_count": NUM_UAVS,
+        "trace_files": [
+            f"uav_trace_{chunk_idx * CHUNK_DURATION_MS}_"
+            f"{min((chunk_idx + 1) * CHUNK_DURATION_MS - 1, TOTAL_DURATION_MS - 1)}_{NUM_UAVS}.csv"
+            for chunk_idx in range(total_chunks)
+        ]
+    }
+    manifest_path = os.path.join(
+        os.path.dirname(output_dir), "manifest.json"
+    )
+    import json
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+    print(f"📋 生成索引文件：manifest.json")
+
+
+# 以无人机数量作为子目录名
+OUTPUT_DIR = os.path.join(OUTPUT_BASE, f"uav_trace_{NUM_UAVS}")
+print(f"[S4] 正在导出切片 CSV 至: {OUTPUT_DIR}")
+split_and_save_uav_csv(uav_results, OUTPUT_DIR)
 
 print("\n" + "="*30)
 for i, (_, count) in enumerate(uav_results):
