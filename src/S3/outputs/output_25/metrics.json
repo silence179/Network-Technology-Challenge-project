@@ -1,10 +1,10 @@
 {
-  "Algorithm": "DTN-CGR",
+  "Algorithm": "Predictive-SPF",
   "Satellite Trace": "traces/sat_trace",
   "Max Steps": 200,
-  "Runtime (s)": 2.19,
-  "Topology Compute Time (ms)": 10.455,
-  "Routing Compute Time (ms)": 319.196,
+  "Runtime (s)": 25.251,
+  "Topology Compute Time (ms)": 19.91,
+  "Routing Compute Time (ms)": 5728.993,
   "Time Steps": 200,
   "Flow Requests": 2600,
   "Successful Routes": 2600,
@@ -17,5 +17,11 @@
   "Avg Active Links": 428.5,
   "Peak Active Links": 431,
   "Topology Changed Steps": 2,
-  "Topology Reuse Rate (%)": 99.0
+  "Topology Reuse Rate (%)": 99.0,
+  "UAV Trace": "traces/uav_trace_full.csv",
+  "Traffic Model": "legacy",
+  "Photo Interval (s)": 10.0,
+  "Photo Size (MB)": 12.0,
+  "Include CTRL Flow": true,
+  "Output Root": "outputs\\output_25"
 }
