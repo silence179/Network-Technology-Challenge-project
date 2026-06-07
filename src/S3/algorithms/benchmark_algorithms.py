@@ -16,6 +16,9 @@ ALGORITHMS = [
     ("otcp", "OTCP"),
     ("ftrl", "FTRL"),
     ("dtn_cgr", "DTN-CGR"),
+    ("srv6_sat", "SRv6-SAT"),
+    ("gnn_route", "GNN-Route"),
+    ("predictive_spf", "Predictive-SPF"),
 ]
 
 
@@ -71,7 +74,8 @@ def plot_benchmark(dataframe, plot_path):
         ("Avg Path Delay (ms)", "Average Path Delay (ms)"),
         ("Routing Compute Time (ms)", "Routing Compute Time (ms)"),
     ]
-    colors = ["#355070", "#6d597a", "#b56576", "#e56b6f", "#2a9d8f", "#eaac8b", "#99c1b9"]
+    colors = ["#355070", "#6d597a", "#b56576", "#e56b6f", "#2a9d8f", "#eaac8b", "#99c1b9",
+              "#264653", "#e76f51", "#f4a261"]
 
     for axis, (column_name, title) in zip(axes.flat, chart_specs):
         bars = axis.bar(algorithms, dataframe[column_name], color=colors[: len(dataframe)], width=0.65)

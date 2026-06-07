@@ -1127,6 +1127,456 @@ class DTNCGRRouter(BaseRouter):
         return best_plan
 
 
+class SRv6SATRouter(BaseRouter):
+    """Segment Routing v6 for Satellite Networks.
+
+    Core idea: Instead of hop-by-hop shortest path, identify high-degree
+    "anchor" satellites as segment endpoints and route through them.
+    This reduces routing table update frequency since segment lists are
+    more stable than per-hop forwarding entries in a dynamic topology.
+
+    Algorithm:
+      1. begin_step: identify top-K anchor nodes (highest degree in topology)
+      2. plan_route: for each (src, dst) pair, try:
+         a) direct shortest path (if short enough)
+         b) segment path via one anchor: src -> anchor -> dst
+         c) segment path via two anchors: src -> anchor1 -> anchor2 -> dst
+         Pick the best valid path by weighted cost (delay + stability bonus).
+    """
+    algorithm_name = "SRv6-SAT"
+
+    def __init__(self, max_anchors=6, direct_hop_threshold=4):
+        self.max_anchors = max_anchors
+        self.direct_hop_threshold = direct_hop_threshold
+        self.anchor_nodes = []
+
+    def begin_step(self, context):
+        """Select anchor nodes: high-degree satellites with good connectivity."""
+        graph = context.graph_delay
+        if len(graph.nodes) == 0:
+            self.anchor_nodes = []
+            return
+
+        # Score each node: degree * stability_bonus * bandwidth_factor
+        node_scores = []
+        for node_id in graph.nodes:
+            degree = graph.degree(node_id)
+            if degree == 0:
+                continue
+            # Prefer SAT nodes as anchors (they have ISL connectivity)
+            type_bonus = 2.0 if (context.type_map or {}).get(node_id) == "SAT" else 1.0
+            # Average bandwidth of incident edges
+            avg_bw = np.mean([
+                float(graph[node_id][neighbor].get("bw_mbps", 0.0))
+                for neighbor in graph.neighbors(node_id)
+            ]) if degree > 0 else 0.0
+            # Average link lifetime (stability)
+            avg_lifetime = np.mean([
+                float(graph[node_id][neighbor].get("lifetime_ms", 60000.0))
+                for neighbor in graph.neighbors(node_id)
+            ]) if degree > 0 else 0.0
+            stability_factor = min(avg_lifetime / 60000.0, 2.0)
+            score = degree * type_bonus * (1.0 + avg_bw / 100.0) * stability_factor
+            node_scores.append((score, node_id))
+
+        node_scores.sort(reverse=True)
+        self.anchor_nodes = [node_id for _, node_id in node_scores[:self.max_anchors]]
+
+    def _try_path(self, graph, edge_lookup, waypoints):
+        """Try to build a path through the given waypoints. Returns RoutePlan or None."""
+        full_path = []
+        for i in range(len(waypoints) - 1):
+            src_wp, dst_wp = waypoints[i], waypoints[i + 1]
+            if not graph.has_node(src_wp) or not graph.has_node(dst_wp):
+                return None
+            try:
+                segment = nx.shortest_path(graph, src_wp, dst_wp, weight="delay_ms")
+            except (nx.NetworkXNoPath, nx.NodeNotFound):
+                return None
+            if i == 0:
+                full_path = segment
+            else:
+                # Avoid loops: check overlap
+                overlap = set(full_path) & set(segment[1:])
+                if overlap:
+                    return None
+                full_path.extend(segment[1:])
+
+        if len(full_path) < 2:
+            return None
+        return self._plan_from_path(full_path, edge_lookup,
+                                     f"segments={len(waypoints)-1};anchors={waypoints[1:-1]}")
+
+    def plan_route(self, flow_request, context):
+        src = flow_request["src"]
+        dst = flow_request["dst"]
+        graph = context.graph_delay
+        edge_lookup = context.active_edge_lookup
+
+        if not graph.has_node(src) or not graph.has_node(dst):
+            return None
+
+        # Option A: direct shortest path
+        direct_plan = None
+        try:
+            direct_path = nx.shortest_path(graph, src, dst, weight="delay_ms")
+            direct_plan = self._plan_from_path(direct_path, edge_lookup, "direct")
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            pass
+
+        # If direct path is short, use it
+        if direct_plan and len(direct_plan.path) <= self.direct_hop_threshold:
+            return direct_plan
+
+        # Option B: route via single anchor
+        best_plan = direct_plan
+        best_cost = direct_plan.estimated_delay_ms if direct_plan else float("inf")
+
+        for anchor in self.anchor_nodes:
+            if anchor == src or anchor == dst:
+                continue
+            plan = self._try_path(graph, edge_lookup, [src, anchor, dst])
+            if plan is None:
+                continue
+            # Segment routing bonus: prefer anchor paths for stability
+            effective_cost = plan.estimated_delay_ms * 0.9  # 10% stability discount
+            if effective_cost < best_cost:
+                best_cost = effective_cost
+                best_plan = plan
+
+        # Option C: route via two anchors (for long-distance flows)
+        if best_plan is None or best_cost > 50.0:
+            for i, anchor_a in enumerate(self.anchor_nodes):
+                if anchor_a == src or anchor_a == dst:
+                    continue
+                for anchor_b in self.anchor_nodes[i + 1:]:
+                    if anchor_b == src or anchor_b == dst:
+                        continue
+                    # Try both orderings
+                    for waypoints in ([src, anchor_a, anchor_b, dst],
+                                      [src, anchor_b, anchor_a, dst]):
+                        plan = self._try_path(graph, edge_lookup, waypoints)
+                        if plan is None:
+                            continue
+                        effective_cost = plan.estimated_delay_ms * 0.85
+                        if effective_cost < best_cost:
+                            best_cost = effective_cost
+                            best_plan = plan
+
+        return best_plan
+
+
+class GNNRouter(BaseRouter):
+    """Graph Neural Network-inspired Routing.
+
+    Uses multi-round message passing to compute node embeddings that
+    capture neighborhood structure, then scores neighbors based on
+    aggregated features. Better captures graph topology than MA-DRL's
+    fixed-weight approach.
+
+    Message passing rounds:
+      Round 1: aggregate immediate neighbor features
+      Round 2: aggregate 2-hop neighborhood features (wider view)
+
+    Features per node: [degree, avg_delay, avg_bw, load, stability,
+                        distance_to_dst, progress_ratio]
+    """
+    algorithm_name = "GNN-Route"
+
+    def __init__(self, num_rounds=2, feature_dim=8, hidden_dim=12):
+        self.num_rounds = num_rounds
+        self.feature_dim = feature_dim
+        self.hidden_dim = hidden_dim
+        # Message passing weights (simulating trained GNN parameters)
+        rng = np.random.RandomState(2024)
+        self.W_msg = rng.randn(feature_dim, hidden_dim) * 0.3
+        self.W_upd = rng.randn(feature_dim + hidden_dim, feature_dim) * 0.3
+        self.W_score = rng.randn(feature_dim * 2) * 0.5
+        # Pre-computed embeddings for the current step
+        self.node_embeddings = {}
+
+    def _compute_raw_features(self, node_id, context):
+        """Compute raw feature vector for a node."""
+        graph = context.graph_delay
+        if not graph.has_node(node_id):
+            return np.zeros(self.feature_dim)
+
+        degree = graph.degree(node_id)
+        neighbors = list(graph.neighbors(node_id))
+
+        avg_delay = np.mean([
+            float(graph[node_id][n].get("delay_ms", 0.0)) for n in neighbors
+        ]) / 30.0 if neighbors else 0.0
+
+        avg_bw = np.mean([
+            float(graph[node_id][n].get("bw_mbps", 0.0)) for n in neighbors
+        ]) / 100.0 if neighbors else 0.0
+
+        load = context.node_loads.get(node_id, 0) / 10.0
+
+        avg_lifetime = np.mean([
+            float(graph[node_id][n].get("lifetime_ms", 60000.0)) for n in neighbors
+        ]) / 60000.0 if neighbors else 0.0
+
+        # Node type encoding
+        node_type = (context.type_map or {}).get(node_id, "")
+        type_enc = 1.0 if node_type == "SAT" else (0.5 if node_type == "UAV" else 0.0)
+
+        # Betweenness approximation: degree / max_degree
+        max_degree = max((graph.degree(n) for n in graph.nodes), default=1)
+        centrality = degree / max(max_degree, 1)
+
+        features = np.array([
+            degree / 20.0,        # normalized degree
+            avg_delay,            # normalized avg delay
+            avg_bw,               # normalized avg bandwidth
+            load,                 # normalized load
+            avg_lifetime,         # normalized stability
+            type_enc,             # node type encoding
+            centrality,           # centrality approximation
+            0.0,                  # placeholder (filled contextually)
+        ], dtype=float)
+
+        return features[:self.feature_dim]
+
+    def begin_step(self, context):
+        """Run message passing to compute node embeddings."""
+        graph = context.graph_delay
+        if len(graph.nodes) == 0:
+            self.node_embeddings = {}
+            return
+
+        # Initialize features
+        embeddings = {}
+        for node_id in graph.nodes:
+            embeddings[node_id] = self._compute_raw_features(node_id, context)
+
+        # Message passing rounds
+        for _ in range(self.num_rounds):
+            new_embeddings = {}
+            for node_id in graph.nodes:
+                neighbors = list(graph.neighbors(node_id))
+                if not neighbors:
+                    new_embeddings[node_id] = embeddings[node_id]
+                    continue
+
+                # Aggregate neighbor messages
+                neighbor_features = np.array([embeddings[n] for n in neighbors])
+                # Mean aggregation with attention-like weighting by edge quality
+                edge_weights = np.array([
+                    1.0 / max(float(graph[node_id][n].get("delay_ms", 1.0)), 0.1)
+                    for n in neighbors
+                ])
+                edge_weights = edge_weights / (edge_weights.sum() + 1e-8)
+                aggregated = edge_weights @ neighbor_features  # weighted mean
+
+                # Message transformation
+                msg = np.tanh(aggregated @ self.W_msg[:self.feature_dim, :self.hidden_dim])
+
+                # Update: combine self features with aggregated message
+                combined = np.concatenate([embeddings[node_id], msg])
+                updated = np.tanh(combined @ self.W_upd[:self.feature_dim + self.hidden_dim, :self.feature_dim])
+                new_embeddings[node_id] = updated
+
+            embeddings = new_embeddings
+
+        self.node_embeddings = embeddings
+
+    def _score_neighbor(self, current, neighbor, dst, context):
+        """Score a neighbor using GNN embeddings."""
+        if neighbor not in self.node_embeddings or dst not in self.node_embeddings:
+            return -float("inf")
+
+        neighbor_emb = self.node_embeddings[neighbor]
+        dst_emb = self.node_embeddings[dst]
+
+        # Combine neighbor and destination embeddings
+        combined = np.concatenate([neighbor_emb, dst_emb])
+
+        # Score via learned projection
+        score = float(combined @ self.W_score)
+
+        # Add geometric progress bonus
+        if current in context.node_positions and neighbor in context.node_positions and dst in context.node_positions:
+            current_dist = np.linalg.norm(context.node_positions[current] - context.node_positions[dst])
+            neighbor_dist = np.linalg.norm(context.node_positions[neighbor] - context.node_positions[dst])
+            progress = (current_dist - neighbor_dist) / max(current_dist, 1.0)
+            score += progress * 2.0
+
+        # Edge quality bonus
+        edge_attrs = context.graph_delay[current][neighbor]
+        delay_penalty = float(edge_attrs.get("delay_ms", 0.0)) / 30.0
+        bw_bonus = float(edge_attrs.get("bw_mbps", 0.0)) / 100.0
+        score += bw_bonus - delay_penalty
+
+        return score
+
+    def plan_route(self, flow_request, context):
+        src = flow_request["src"]
+        dst = flow_request["dst"]
+        if src not in context.node_positions or dst not in context.node_positions:
+            return None
+
+        path = [src]
+        visited = {src}
+        current = src
+
+        for _ in range(DEFAULT_MAX_ROUTE_HOPS):
+            if current == dst:
+                return self._plan_from_path(path, context.active_edge_lookup, "gnn_message_passing")
+            if not context.graph_delay.has_node(current):
+                return None
+
+            candidates = []
+            for neighbor in context.graph_delay.neighbors(current):
+                if neighbor in visited:
+                    continue
+                score = self._score_neighbor(current, neighbor, dst, context)
+                candidates.append((score, neighbor))
+
+            if not candidates:
+                return None
+
+            candidates.sort(reverse=True)
+            # Top-1 selection (could add stochastic sampling for exploration)
+            best_neighbor = candidates[0][1]
+            path.append(best_neighbor)
+            visited.add(best_neighbor)
+            current = best_neighbor
+
+        return None
+
+
+class PredictiveSPFRouter(BaseRouter):
+    """Predictive Shortest Path First.
+
+    Exploits the deterministic nature of satellite orbits to evaluate
+    path stability over future time steps. Instead of just finding
+    the shortest path NOW, it finds paths that remain good ACROSS
+    multiple future topology snapshots.
+
+    Algorithm:
+      1. Compute K candidate shortest paths in current topology
+      2. For each candidate, evaluate it against future snapshots:
+         - Does the path still exist in future step τ?
+         - What is its delay in future step τ?
+      3. Score = weighted sum of current delay + future stability
+      4. Select the path with the best combined score
+    """
+    algorithm_name = "Predictive-SPF"
+    requires_future_snapshots = True
+
+    def __init__(self, num_candidates=4, stability_weight=0.3, future_discount=0.85):
+        self.num_candidates = num_candidates
+        self.stability_weight = stability_weight
+        self.future_discount = future_discount
+        # Cache of validated stable paths for reuse within a step
+        self.step_path_cache = {}
+
+    def begin_step(self, context):
+        """Clear per-step path cache."""
+        self.step_path_cache = {}
+
+    def _evaluate_path_in_snapshot(self, path, snapshot):
+        """Check if a path exists and compute its delay in a future snapshot.
+        Returns (exists, delay_ms)."""
+        graph = snapshot["G"]
+        total_delay = 0.0
+        for i in range(len(path) - 1):
+            src_node, dst_node = path[i], path[i + 1]
+            if not graph.has_edge(src_node, dst_node):
+                return False, float("inf")
+            total_delay += float(graph[src_node][dst_node].get("eff_delay",
+                                 graph[src_node][dst_node].get("delay_ms", 0.0)))
+        return True, total_delay
+
+    def _score_path(self, path, current_delay, context):
+        """Score a path based on current delay + future stability."""
+        snapshots = context.future_snapshots or []
+        if not snapshots:
+            return current_delay
+
+        # Current delay component
+        score = current_delay * (1.0 - self.stability_weight)
+
+        # Future stability component
+        future_score = 0.0
+        total_weight = 0.0
+        for tau, snapshot in enumerate(snapshots):
+            weight = self.future_discount ** tau
+            total_weight += weight
+            exists, future_delay = self._evaluate_path_in_snapshot(path, snapshot)
+            if exists:
+                future_score += weight * future_delay
+            else:
+                # Path broken in future: heavy penalty
+                future_score += weight * current_delay * 3.0
+
+        if total_weight > 0:
+            future_score /= total_weight
+
+        score += future_score * self.stability_weight
+        return score
+
+    def plan_route(self, flow_request, context):
+        src = flow_request["src"]
+        dst = flow_request["dst"]
+        graph = context.graph_delay
+        edge_lookup = context.active_edge_lookup
+
+        if not graph.has_node(src) or not graph.has_node(dst):
+            return None
+
+        # Check cache
+        cache_key = (src, dst)
+        if cache_key in self.step_path_cache:
+            cached_plan = self.step_path_cache[cache_key]
+            # Verify cached path is still valid
+            summary = summarize_path(cached_plan.path, edge_lookup)
+            if summary is not None:
+                return cached_plan
+
+        # Generate K candidate paths
+        candidate_paths = []
+        try:
+            path_gen = nx.shortest_simple_paths(graph, src, dst, weight="delay_ms")
+            candidate_paths = list(itertools.islice(path_gen, self.num_candidates))
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            return None
+
+        if not candidate_paths:
+            return None
+
+        # Score each candidate
+        best_plan = None
+        best_score = float("inf")
+
+        for path in candidate_paths:
+            summary = summarize_path(path, edge_lookup)
+            if summary is None:
+                continue
+            current_delay, bottleneck_bw = summary
+
+            combined_score = self._score_path(path, current_delay, context)
+
+            if combined_score < best_score:
+                best_score = combined_score
+                hop_count = len(path) - 1
+                future_snapshots_count = len(context.future_snapshots or [])
+                best_plan = RoutePlan(
+                    path=path,
+                    algo=self.algorithm_name,
+                    estimated_delay_ms=round(current_delay, 3),
+                    bottleneck_bw_mbps=round(bottleneck_bw, 3),
+                    notes=f"candidates={len(candidate_paths)};horizon={future_snapshots_count};stability_score={combined_score:.2f}",
+                )
+
+        if best_plan is not None:
+            self.step_path_cache[cache_key] = best_plan
+
+        return best_plan
+
+
 ROUTER_REGISTRY = {
     "optimized": OptimizedRouter,
     "hypatia": HypatiaRouter,
@@ -1135,6 +1585,9 @@ ROUTER_REGISTRY = {
     "otcp": OTCPRouter,
     "ftrl": FTRLRouter,
     "dtn_cgr": DTNCGRRouter,
+    "srv6_sat": SRv6SATRouter,
+    "gnn_route": GNNRouter,
+    "predictive_spf": PredictiveSPFRouter,
 }
 
 
