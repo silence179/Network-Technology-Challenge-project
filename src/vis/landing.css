@@ -1,0 +1,266 @@
+/* ========================================
+   Star-CDN Landing Page Styles
+   ======================================== */
+
+:root {
+    --accent: #00f2ff;
+    --accent-dim: rgba(0, 242, 255, 0.3);
+    --bg-dark: #0a0f1e;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: var(--bg-dark);
+    color: #fff;
+    font-family: "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif;
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ---- 星空背景 (纯 CSS) ---- */
+.stars-bg {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 0; pointer-events: none;
+    background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
+}
+
+/* 生成多层星星阴影 */
+.stars-layer {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+}
+.stars-layer::before,
+.stars-layer::after {
+    content: "";
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+}
+
+/* 小星星 - 用 box-shadow 模拟随机星点 */
+.stars-small {
+    width: 1px; height: 1px; border-radius: 50%;
+    box-shadow:
+        10vw 20vh #fff, 30vw 15vh #fff, 50vw 70vh #fff, 70vw 40vh #fff,
+        90vw 10vh #fff, 15vw 80vh #fff, 35vw 60vh #fff, 55vw 30vh #fff,
+        75vw 90vh #fff, 95vw 50vh #fff, 5vw 50vh #fff, 25vw 90vh #fff,
+        45vw 10vh #fff, 65vw 80vh #fff, 85vw 30vh #fff, 20vw 40vh #fff,
+        40vw 95vh #fff, 60vw 5vh #fff, 80vw 65vh #fff, 8vw 35vh #fff,
+        48vw 45vh #fff, 68vw 55vh #fff, 88vw 75vh #fff, 12vw 65vh #fff,
+        32vw 25vh #fff, 52vw 85vh #fff, 72vw 15vh #fff, 92vw 60vh #fff,
+        18vw 70vh #fff, 38vw 5vh #fff, 58vw 50vh #fff, 78vw 95vh #fff,
+        22vw 55vh #fff, 42vw 15vh #fff, 62vw 90vh #fff, 82vw 35vh #fff;
+    animation: twinkle 4s ease-in-out infinite alternate;
+}
+
+.stars-medium {
+    width: 2px; height: 2px; border-radius: 50%;
+    box-shadow:
+        12vw 25vh rgba(200, 220, 255, 0.9),
+        33vw 72vh rgba(200, 220, 255, 0.9),
+        54vw 18vh rgba(200, 220, 255, 0.9),
+        76vw 55vh rgba(200, 220, 255, 0.9),
+        88vw 82vh rgba(200, 220, 255, 0.9),
+        17vw 63vh rgba(200, 220, 255, 0.9),
+        44vw 40vh rgba(200, 220, 255, 0.9),
+        63vw 88vh rgba(200, 220, 255, 0.9),
+        81vw 22vh rgba(200, 220, 255, 0.9),
+        27vw 48vh rgba(200, 220, 255, 0.9),
+        39vw 10vh rgba(200, 220, 255, 0.9),
+        59vw 68vh rgba(200, 220, 255, 0.9),
+        71vw 35vh rgba(200, 220, 255, 0.9),
+        93vw 45vh rgba(200, 220, 255, 0.9);
+    animation: twinkle 6s ease-in-out infinite alternate-reverse;
+}
+
+.stars-bright {
+    width: 3px; height: 3px; border-radius: 50%;
+    box-shadow:
+        24vw 32vh rgba(0, 242, 255, 0.8),
+        47vw 78vh rgba(0, 242, 255, 0.8),
+        64vw 12vh rgba(0, 242, 255, 0.8),
+        83vw 58vh rgba(0, 242, 255, 0.8),
+        6vw 88vh rgba(0, 242, 255, 0.8),
+        36vw 22vh rgba(0, 242, 255, 0.8),
+        55vw 52vh rgba(0, 242, 255, 0.8),
+        79vw 42vh rgba(0, 242, 255, 0.8),
+        14vw 5vh rgba(0, 242, 255, 0.8),
+        42vw 82vh rgba(0, 242, 255, 0.8),
+        68vw 28vh rgba(0, 242, 255, 0.8),
+        87vw 72vh rgba(0, 242, 255, 0.8);
+    animation: twinkle 5s ease-in-out infinite alternate;
+}
+
+@keyframes twinkle {
+    0% { opacity: 0.4; }
+    50% { opacity: 0.8; }
+    100% { opacity: 1; }
+}
+
+/* ---- 主内容区 ---- */
+.hero {
+    position: relative; z-index: 1;
+    text-align: center;
+    max-width: 860px;
+    padding: 40px;
+    animation: fadeInUp 1.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(40px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.hero-logo {
+    display: inline-flex; align-items: center; gap: 10px;
+    margin-bottom: 12px;
+}
+
+.hero-logo .icon {
+    width: 48px; height: 48px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(0,242,255,0.2), rgba(0,150,255,0.1));
+    border: 1px solid rgba(0,242,255,0.3);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 24px rgba(0, 242, 255, 0.15);
+}
+
+.hero h1 {
+    font-size: 2.6em; font-weight: 700; letter-spacing: 2px;
+    margin-bottom: 6px;
+    background: linear-gradient(135deg, #fff 0%, #a0e9ff 60%, var(--accent) 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* ---- 标题区块 ---- */
+.title-block {
+    margin-bottom: 14px;
+}
+.title-main {
+    font-size: 1.7em; font-weight: 700; letter-spacing: 2px;
+    line-height: 1.4;
+    margin: 0 0 14px 0;
+    background: linear-gradient(135deg, #fff 0%, #b0e5ff 40%, var(--accent) 80%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.acronym-badge {
+    display: inline-block;
+    font-size: 0.85em; font-weight: 700; letter-spacing: 4px;
+    padding: 6px 22px;
+    color: var(--accent);
+    background: rgba(0, 242, 255, 0.08);
+    border: 1px solid rgba(0, 242, 255, 0.35);
+    border-radius: 20px;
+    box-shadow: 0 0 16px rgba(0, 242, 255, 0.1), inset 0 0 8px rgba(0, 242, 255, 0.05);
+}
+
+.hero .subtitle {
+    font-size: 1.05em; color: #8ab4f8; letter-spacing: 3px;
+    margin-bottom: 16px; text-transform: uppercase;
+}
+
+.hero .description {
+    font-size: 0.95em; color: rgba(255,255,255,0.55);
+    line-height: 1.8; margin-bottom: 40px;
+}
+
+/* ---- 功能卡片 ---- */
+.feature-cards {
+    display: flex; gap: 16px; justify-content: center;
+    flex-wrap: wrap; margin-bottom: 36px;
+}
+
+.feature-card {
+    background: rgba(10, 20, 35, 0.6);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(0, 242, 255, 0.15);
+    border-radius: 10px; padding: 18px 20px;
+    width: 180px; text-align: center;
+    transition: all 0.35s ease;
+}
+.feature-card:hover {
+    border-color: var(--accent-dim);
+    box-shadow: 0 0 20px rgba(0, 242, 255, 0.12);
+    transform: translateY(-3px);
+}
+
+.feature-card .fc-icon { font-size: 1.8em; margin-bottom: 8px; }
+.feature-card .fc-title { font-size: 0.9em; color: #e0f7fa; font-weight: 600; margin-bottom: 4px; }
+.feature-card .fc-desc { font-size: 0.75em; color: rgba(255,255,255,0.4); }
+
+/* ---- 进入按钮 ---- */
+.btn-enter {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 14px 48px; font-size: 1.1em;
+    font-weight: 600; letter-spacing: 2px;
+    color: #000; text-decoration: none;
+    background: linear-gradient(135deg, var(--accent), #00a8cc);
+    border: none; border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+    box-shadow: 0 4px 24px rgba(0, 242, 255, 0.35);
+    position: relative; overflow: hidden;
+}
+.btn-enter::after {
+    content: "";
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: linear-gradient(135deg, transparent 40%, rgba(255,255,255,0.3) 50%, transparent 60%);
+    transform: translateX(-100%);
+    transition: transform 0.6s ease;
+}
+.btn-enter:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 36px rgba(0, 242, 255, 0.5);
+}
+.btn-enter:hover::after {
+    transform: translateX(100%);
+}
+
+.btn-enter .arrow {
+    display: inline-block; transition: transform 0.3s ease;
+}
+.btn-enter:hover .arrow {
+    transform: translateX(4px);
+}
+
+/* ---- 次级按钮组 ---- */
+.btn-group {
+    display: flex; gap: 16px; justify-content: center;
+    flex-wrap: wrap; margin-bottom: 10px;
+}
+
+.btn-secondary {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 36px; font-size: 0.95em;
+    font-weight: 500; letter-spacing: 1px;
+    color: #e0f7fa; text-decoration: none;
+    background: rgba(0, 242, 255, 0.06);
+    border: 1px solid rgba(0, 242, 255, 0.3);
+    border-radius: 10px; cursor: pointer;
+    transition: all 0.35s ease;
+}
+.btn-secondary:hover {
+    background: rgba(0, 242, 255, 0.15);
+    border-color: var(--accent);
+    box-shadow: 0 0 18px rgba(0, 242, 255, 0.2);
+    transform: translateY(-1px);
+}
+
+<!-- -->
+
+/* ---- 底部信息 ---- */
+.footer-note {
+    margin-top: 32px;
+    font-size: 0.75em; color: rgba(255,255,255,0.25);
+    letter-spacing: 1px;
+}
+
+/* ---- 响应式 ---- */
+@media (max-width: 640px) {
+    .hero h1, .title-main { font-size: 1.2em; letter-spacing: 1px; }
+    .feature-cards { flex-direction: column; align-items: center; }
+    .feature-card { width: 100%; max-width: 280px; }
+}

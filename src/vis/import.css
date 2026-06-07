@@ -1,0 +1,231 @@
+/* ========================================
+   Star-CDN Trajectory Import Page Styles
+   ======================================== */
+
+:root {
+    --accent: #00f2ff;
+    --accent-dim: rgba(0, 242, 255, 0.3);
+    --bg-dark: #0a0f1e;
+    --panel-bg: rgba(10, 20, 35, 0.7);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: var(--bg-dark);
+    color: #fff;
+    font-family: "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif;
+    width: 100vw; height: 100vh;
+    overflow-y: auto;
+}
+
+/* 星空背景 - 复用 */
+.stars-bg {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 0; pointer-events: none;
+    background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
+}
+.stars-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+.stars-small {
+    width: 1px; height: 1px; border-radius: 50%;
+    box-shadow:
+        10vw 20vh #fff, 30vw 15vh #fff, 50vw 70vh #fff, 70vw 40vh #fff,
+        90vw 10vh #fff, 15vw 80vh #fff, 35vw 60vh #fff, 55vw 30vh #fff,
+        75vw 90vh #fff, 95vw 50vh #fff, 5vw 50vh #fff, 25vw 90vh #fff,
+        45vw 10vh #fff, 65vw 80vh #fff, 85vw 30vh #fff, 20vw 40vh #fff,
+        40vw 95vh #fff, 60vw 5vh #fff, 80vw 65vh #fff, 8vw 35vh #fff;
+    animation: twinkle 4s ease-in-out infinite alternate;
+}
+.stars-medium {
+    width: 2px; height: 2px; border-radius: 50%;
+    box-shadow:
+        12vw 25vh rgba(200,220,255,0.9), 33vw 72vh rgba(200,220,255,0.9),
+        54vw 18vh rgba(200,220,255,0.9), 76vw 55vh rgba(200,220,255,0.9),
+        88vw 82vh rgba(200,220,255,0.9), 17vw 63vh rgba(200,220,255,0.9),
+        44vw 40vh rgba(200,220,255,0.9), 63vw 88vh rgba(200,220,255,0.9);
+    animation: twinkle 6s ease-in-out infinite alternate-reverse;
+}
+.stars-bright {
+    width: 3px; height: 3px; border-radius: 50%;
+    box-shadow:
+        24vw 32vh rgba(0,242,255,0.8), 47vw 78vh rgba(0,242,255,0.8),
+        64vw 12vh rgba(0,242,255,0.8), 83vw 58vh rgba(0,242,255,0.8),
+        36vw 22vh rgba(0,242,255,0.8), 55vw 52vh rgba(0,242,255,0.8);
+    animation: twinkle 5s ease-in-out infinite alternate;
+}
+@keyframes twinkle {
+    0% { opacity: 0.4; } 50% { opacity: 0.8; } 100% { opacity: 1; }
+}
+
+/* ---- 回到主页 ---- */
+.back-home {
+    position: fixed; top: 20px; left: 20px; z-index: 100;
+    display: flex; align-items: center; gap: 6px;
+    background: var(--panel-bg); backdrop-filter: blur(12px);
+    border: 1px solid var(--accent-dim); color: #e0f7fa;
+    padding: 8px 16px; border-radius: 8px; cursor: pointer;
+    font-size: 13px; text-decoration: none;
+    transition: all 0.3s ease; font-family: inherit;
+}
+.back-home:hover {
+    background: rgba(0,242,255,0.15); border-color: var(--accent);
+    color: #fff; box-shadow: 0 0 15px rgba(0,242,255,0.3);
+}
+
+/* ---- 主容器 ---- */
+.container {
+    position: relative; z-index: 1;
+    max-width: 900px; margin: 0 auto;
+    padding: 80px 24px 60px;
+}
+
+/* ---- 页头 ---- */
+.page-header {
+    text-align: center; margin-bottom: 48px;
+}
+.page-header h1 {
+    font-size: 2em; font-weight: 700;
+    background: linear-gradient(135deg, #fff 0%, #a0e9ff 60%, var(--accent) 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.page-header .subtitle {
+    margin-top: 8px; font-size: 0.9em; color: rgba(255,255,255,0.4);
+    letter-spacing: 1px;
+}
+
+/* ---- 导入区域卡片 ---- */
+.import-section {
+    background: var(--panel-bg);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(0,242,255,0.15);
+    border-radius: 16px; padding: 28px;
+    margin-bottom: 24px;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.import-section:hover {
+    border-color: var(--accent-dim);
+    box-shadow: 0 0 20px rgba(0,242,255,0.08);
+}
+
+.section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 20px; flex-wrap: wrap; gap: 12px;
+}
+.section-title {
+    display: flex; align-items: center; gap: 10px;
+}
+.section-title .icon {
+    font-size: 1.6em;
+}
+.section-title h2 {
+    font-size: 1.2em; font-weight: 600; color: #e0f7fa;
+}
+.section-title .badge {
+    font-size: 0.75em; padding: 3px 10px; border-radius: 12px;
+    background: rgba(0,242,255,0.1); color: var(--accent);
+    border: 1px solid var(--accent-dim);
+}
+
+/* 文件夹路径行 */
+.folder-row {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
+    background: rgba(0,0,0,0.3); border-radius: 8px; padding: 10px 14px;
+    flex-wrap: wrap;
+}
+.folder-label {
+    font-size: 0.8em; color: rgba(255,255,255,0.5);
+    white-space: nowrap;
+}
+.folder-path {
+    flex: 1; font-size: 0.8em; color: rgba(255,255,255,0.3);
+    font-family: "Consolas", "Courier New", monospace;
+    word-break: break-all; min-width: 200px;
+}
+.btn-open-folder {
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(0,242,255,0.08); border: 1px solid rgba(0,242,255,0.25);
+    color: #c0e8ff; padding: 6px 14px; border-radius: 6px;
+    cursor: pointer; font-size: 0.82em; white-space: nowrap;
+    transition: all 0.25s ease; font-family: inherit;
+}
+.btn-open-folder:hover {
+    background: rgba(0,242,255,0.15); border-color: var(--accent);
+    color: #fff;
+}
+
+/* 程序生成按钮 */
+.btn-generate {
+    display: flex; align-items: center; gap: 7px;
+    background: rgba(0, 200, 100, 0.1); border: 1px solid rgba(0, 200, 100, 0.3);
+    color: #5effa0; padding: 7px 16px; border-radius: 7px;
+    cursor: pointer; font-size: 0.85em; font-weight: 500; white-space: nowrap;
+    transition: all 0.3s ease; font-family: inherit;
+}
+.btn-generate:hover {
+    background: rgba(0, 200, 100, 0.2); border-color: rgba(0, 200, 100, 0.5);
+    box-shadow: 0 0 14px rgba(0, 200, 100, 0.2);
+}
+.btn-generate.running {
+    background: rgba(255, 193, 7, 0.1); border-color: rgba(255, 193, 7, 0.4);
+    color: #ffc107; animation: pulse 1.5s ease-in-out infinite;
+    pointer-events: none;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* ---- 拖拽上传区 ---- */
+.drop-zone {
+    border: 2px dashed rgba(0,242,255,0.2);
+    border-radius: 12px; padding: 32px; text-align: center;
+    transition: all 0.3s ease; cursor: pointer;
+    background: rgba(0,0,0,0.2);
+}
+.drop-zone:hover,
+.drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(0,242,255,0.05);
+    box-shadow: 0 0 24px rgba(0,242,255,0.1);
+}
+.drop-zone .dz-icon {
+    font-size: 2em; margin-bottom: 8px;
+}
+.drop-zone .dz-text {
+    font-size: 0.9em; color: rgba(255,255,255,0.5);
+}
+.drop-zone .dz-hint {
+    font-size: 0.75em; color: rgba(255,255,255,0.25);
+    margin-top: 6px;
+}
+.drop-zone input[type="file"] { display: none; }
+
+/* ---- 导入结果反馈 ---- */
+.toast {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 9999; padding: 12px 28px; border-radius: 8px;
+    font-size: 0.9em; pointer-events: none;
+    opacity: 0; transition: opacity 0.35s ease, transform 0.35s ease;
+    transform: translateX(-50%) translateY(-10px);
+}
+.toast.show {
+    opacity: 1; transform: translateX(-50%) translateY(0);
+}
+.toast.success {
+    background: rgba(0,200,100,0.2); border: 1px solid rgba(0,200,100,0.4);
+    color: #5effa0;
+}
+.toast.error {
+    background: rgba(255,71,87,0.2); border: 1px solid rgba(255,71,87,0.4);
+    color: #ff6b7a;
+}
+
+/* ---- 响应式 ---- */
+@media (max-width: 640px) {
+    .container { padding: 60px 16px 40px; }
+    .section-header { flex-direction: column; align-items: flex-start; }
+    .folder-row { flex-direction: column; align-items: stretch; }
+    .btn-open-folder { justify-content: center; }
+}

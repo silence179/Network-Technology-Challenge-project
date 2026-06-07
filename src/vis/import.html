@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>轨迹导入 - Star-CDN</title>
+    <link rel="stylesheet" href="/import.css">
+</head>
+<body>
+
+    <!-- 星空背景 -->
+    <div class="stars-bg">
+        <div class="stars-layer stars-small"></div>
+        <div class="stars-layer stars-medium"></div>
+        <div class="stars-layer stars-bright"></div>
+    </div>
+
+    <!-- 返回主页 -->
+    <a href="/" class="back-home">
+        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+            <path d="M3 12h18M8 5l-7 7 7 7"/>
+        </svg>
+        返回主页
+    </a>
+
+    <!-- Toast 提示 -->
+    <div id="toast" class="toast"></div>
+
+    <div class="container">
+        <!-- 页头 -->
+        <div class="page-header">
+            <h1>📂 数据导入</h1>
+            <p class="subtitle">上传 CSV 数据文件到对应目录</p>
+        </div>
+
+        <!-- ========== 卫星轨迹导入 ========== -->
+        <div class="import-section" id="sat-section">
+            <div class="section-header">
+                <div class="section-title">
+                    <span class="icon">🛰️</span>
+                    <h2>卫星轨迹导入</h2>
+                    <span class="badge" id="sat-count">-- 个文件</span>
+                </div>
+                <button class="btn-generate" id="btn-generate-sat" onclick="generateSatTraces()" title="使用系统自带的模块生成卫星轨迹拓扑">
+                    <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+                        <polygon points="5 3 19 12 5 21 5 3"/>
+                    </svg>
+                    <span id="gen-btn-text">程序生成</span>
+                </button>
+            </div>
+
+            <div class="folder-row">
+                <span class="folder-label">📁 目标目录：</span>
+                <span class="folder-path" id="sat-path">public/data/sat_trace/</span>
+                <button class="btn-open-folder" onclick="openFolder('sat')">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    打开文件夹
+                </button>
+            </div>
+
+            <div class="drop-zone" id="sat-drop">
+                <div class="dz-icon">📤</div>
+                <div class="dz-text">拖拽 CSV 文件到此处，或点击选择文件</div>
+                <div class="dz-hint">支持 .csv 格式，文件名格式：sat_trace_*.csv</div>
+                <input type="file" id="sat-file-input" accept=".csv" multiple>
+            </div>
+        </div>
+
+        <!-- ========== 无人机轨迹导入 ========== -->
+        <div class="import-section" id="uav-section">
+            <div class="section-header">
+                <div class="section-title">
+                    <span class="icon">🚁</span>
+                    <h2>无人机轨迹导入</h2>
+                    <span class="badge" id="uav-count">-- 个文件</span>
+                </div>
+            </div>
+
+            <div class="folder-row">
+                <span class="folder-label">📁 目标目录：</span>
+                <span class="folder-path" id="uav-path">public/data/uav_trace/</span>
+                <button class="btn-open-folder" onclick="openFolder('uav')">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    打开文件夹
+                </button>
+            </div>
+
+            <div class="drop-zone" id="uav-drop">
+                <div class="dz-icon">📤</div>
+                <div class="dz-text">拖拽 CSV 文件到此处，或点击选择文件</div>
+                <div class="dz-hint">支持 .csv 格式，文件名格式：uav_trace_*.csv</div>
+                <input type="file" id="uav-file-input" accept=".csv" multiple>
+            </div>
+        </div>
+
+        <!-- ========== 网络拓扑导入 ========== -->
+        <div class="import-section" id="topo-section">
+            <div class="section-header">
+                <div class="section-title">
+                    <span class="icon">🔗</span>
+                    <h2>链路拓扑导入</h2>
+                    <span class="badge" id="topo-count">-- 个文件</span>
+                </div>
+            </div>
+
+            <div class="folder-row">
+                <span class="folder-label">📁 目标目录：</span>
+                <span class="folder-path" id="topo-path">public/data/topology_links/</span>
+                <button class="btn-open-folder" onclick="openFolder('topo')">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    打开文件夹
+                </button>
+            </div>
+
+            <div class="drop-zone" id="topo-drop">
+                <div class="dz-icon">📤</div>
+                <div class="dz-text">拖拽 CSV 文件到此处，或点击选择文件</div>
+                <div class="dz-hint">支持 .csv 格式，文件名格式：topology_links_*.csv</div>
+                <input type="file" id="topo-file-input" accept=".csv" multiple>
+            </div>
+        </div>
+
+        <!-- ========== 网络节点导入 ========== -->
+        <div class="import-section" id="networks-section">
+            <div class="section-header">
+                <div class="section-title">
+                    <span class="icon">🌐</span>
+                    <h2>网络节点导入</h2>
+                    <span class="badge" id="networks-count">-- 个文件</span>
+                </div>
+            </div>
+
+            <div class="folder-row">
+                <span class="folder-label">📁 目标目录：</span>
+                <span class="folder-path" id="networks-path">public/data/networks/</span>
+                <button class="btn-open-folder" onclick="openFolder('networks')">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    打开文件夹
+                </button>
+            </div>
+
+            <div class="drop-zone" id="networks-drop">
+                <div class="dz-icon">📤</div>
+                <div class="dz-text">拖拽 CSV 文件到此处，或点击选择文件</div>
+                <div class="dz-hint">支持 .csv 格式，文件名格式：networks.csv</div>
+                <input type="file" id="networks-file-input" accept=".csv" multiple>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===== 打开文件夹 =====
+        async function openFolder(type) {
+            try {
+                const res = await fetch('/api/open-folder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ folder: type })
+                });
+                if (!res.ok) throw new Error('打开失败');
+                showToast('文件夹已打开', 'success');
+            } catch (e) {
+                showToast('无法打开文件夹', 'error');
+            }
+        }
+
+        // ===== 上传文件 =====
+        async function uploadFiles(type, files) {
+            if (!files || files.length === 0) return;
+
+            let successCount = 0;
+            for (const file of files) {
+                if (!file.name.endsWith('.csv')) continue;
+
+                const formData = new FormData();
+                formData.append('folder', type);
+                formData.append('file', file);
+
+                try {
+                    const res = await fetch('/api/import-file', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const result = await res.json();
+                    if (result.ok) successCount++;
+                } catch (e) {
+                    console.error('Upload failed:', file.name, e);
+                }
+            }
+
+            if (successCount > 0) {
+                showToast(`成功导入 ${successCount} 个文件`, 'success');
+            } else {
+                showToast('导入失败，请检查文件格式', 'error');
+            }
+        }
+
+        // ===== Toast =====
+        function showToast(msg, type) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = `toast ${type} show`;
+            clearTimeout(toast._timer);
+            toast._timer = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2500);
+        }
+
+        // ===== 初始化拖拽 & 点击上传 =====
+        function setupDropZone(zoneId, inputId, type) {
+            const zone = document.getElementById(zoneId);
+            const input = document.getElementById(inputId);
+
+            // 点击打开文件选择器
+            zone.addEventListener('click', (e) => {
+                if (e.target !== input) input.click();
+            });
+
+            // 拖拽高亮
+            zone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                zone.classList.add('drag-over');
+            });
+            zone.addEventListener('dragleave', () => {
+                zone.classList.remove('drag-over');
+            });
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('drag-over');
+                uploadFiles(type, e.dataTransfer.files);
+            });
+
+            // 文件选择
+            input.addEventListener('change', () => {
+                uploadFiles(type, input.files);
+                input.value = '';
+            });
+        }
+
+        // ===== 程序生成卫星轨迹 =====
+        let pollingTimer = null;
+
+        async function generateSatTraces() {
+            const btn = document.getElementById('btn-generate-sat');
+            const text = document.getElementById('gen-btn-text');
+
+            // 启动生成
+            if (!btn.classList.contains('running')) {
+                try {
+                    const res = await fetch('/api/generate-sat-traces', { method: 'POST' });
+                    const result = await res.json();
+                    if (result.ok) {
+                        btn.classList.add('running');
+                        text.textContent = '生成中…';
+                        showToast('卫星轨迹生成任务已启动，请稍候', 'success');
+                        startPolling();
+                    } else {
+                        showToast(result.message || '启动失败', 'error');
+                    }
+                } catch (e) {
+                    showToast('请求失败', 'error');
+                }
+            }
+        }
+
+        function startPolling() {
+            pollingTimer = setInterval(async () => {
+                try {
+                    const res = await fetch('/api/generate-status');
+                    const status = await res.json();
+                    if (!status.running) {
+                        clearInterval(pollingTimer);
+                        pollingTimer = null;
+                        const btn = document.getElementById('btn-generate-sat');
+                        const text = document.getElementById('gen-btn-text');
+                        btn.classList.remove('running');
+                        if (status.error) {
+                            text.textContent = '生成失败';
+                            showToast(`生成失败: ${status.error}`, 'error');
+                        } else {
+                            text.textContent = '生成完成 ✓';
+                            showToast('卫星轨迹生成完成！文件已输出到 S3 和 vis 前端', 'success');
+                            setTimeout(() => { text.textContent = '程序生成'; }, 3000);
+                        }
+                    }
+                } catch (e) {
+                    clearInterval(pollingTimer);
+                    pollingTimer = null;
+                }
+            }, 2000);
+        }
+
+        setupDropZone('sat-drop', 'sat-file-input', 'sat');
+        setupDropZone('uav-drop', 'uav-file-input', 'uav');
+        setupDropZone('topo-drop', 'topo-file-input', 'topo');
+        setupDropZone('networks-drop', 'networks-file-input', 'networks');
+    </script>
+
+</body>
+</html>

@@ -38,6 +38,7 @@ async function loadRealPerformanceData() {
 	// 尝试多个可能的路径（包括绝对路径和相对路径）
 	const baseUrl = window.location.origin;
 	const possiblePaths = [
+			'/data/networks/networks.csv',
 		'/data/networks.csv',
 		'./data/networks.csv',
 		'public/data/networks.csv',

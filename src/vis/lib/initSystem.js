@@ -16,19 +16,18 @@ export async function initSystem(viewer) {
         }
         viewer.scene.globe.depthTestAgainstTerrain = true;
 
-        // 定义数据文件路径（相对于public目录）
-        const satFiles = [
-            '/data/sat_trace/sat_trace_0_59999.csv',
-            '/data/sat_trace/sat_trace_60000_119999.csv',
-            '/data/sat_trace/sat_trace_120000_179999.csv',
-            '/data/sat_trace/sat_trace_180000_239999.csv',
-            '/data/sat_trace/sat_trace_240000_299999.csv',
-            '/data/sat_trace/sat_trace_300000_359999.csv',
-            '/data/sat_trace/sat_trace_360000_419999.csv',
-            '/data/sat_trace/sat_trace_420000_479999.csv',
-            '/data/sat_trace/sat_trace_480000_539999.csv',
-            '/data/sat_trace/sat_trace_540000_599999.csv'
-        ];
+        // 动态获取卫星轨迹文件列表（兼容不同后缀）
+        let satFiles = [];
+        try {
+            const res = await fetch('/api/list-files?folder=sat');
+            if (res.ok) {
+                const fileNames = await res.json();
+                satFiles = fileNames.map(f => `/data/sat_trace/${f}`);
+                console.log(`[initSystem] 发现 ${satFiles.length} 个卫星轨迹文件`);
+            }
+        } catch (e) {
+            console.warn('[initSystem] 无法获取卫星文件列表，使用空列表', e);
+        }
         const topoFiles = [
             '/data/topology_links/topology_links_0_59900.csv',
             '/data/topology_links/topology_links_60000_119900.csv',
@@ -41,7 +40,7 @@ export async function initSystem(viewer) {
             '/data/topology_links/topology_links_480000_539900.csv',
             '/data/topology_links/topology_links_540000_599900.csv'
         ];
-        const uavFile = ['/data/uav_trace_full.csv'];
+        const uavFile = ['/data/uav_trace/uav_trace_full.csv'];
 
         // 辅助函数：加载多个CSV文件并合并数据
         const loadMultipleCSV = async (filePaths) => {

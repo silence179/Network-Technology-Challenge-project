@@ -38,7 +38,14 @@ OUTPUT_BASE = os.path.join(
     "S3",
     "traces",
     "sat_trace"
-)  # 输出根目录
+)  # 输出根目录（S3模块用）
+VIS_SAT_TRACE_DIR = os.path.join(
+    PARENT_DIR,
+    "vis",
+    "public",
+    "data",
+    "sat_trace"
+)  # vis前端卫星轨迹目录
 CHUNK_DURATION_SEC = 60  # 每个文件的时间切片（60秒）
 
 # 5. 动态筛选配置
@@ -265,10 +272,11 @@ def calculate_sat_trajectory(sat_metadata, ts, t0): #旧的轨迹计算
     print(f"📊 完成 {total_steps} 个时间步的轨迹计算，共 {len(all_traces)} 条记录")
     return pd.DataFrame(all_traces)
 
-def split_and_save_csv(trajectory_df, output_dir):
+def split_and_save_csv(trajectory_df, output_dir, make_manifest=True):
     """
     按60秒切片保存CSV文件
     文件名格式：sat_trace_{startMs}_{endMs}.csv
+    make_manifest: 是否在上级目录生成 manifest.json（S3需要，vis不需要）
     """
     # 创建输出目录（如果不存在）
     os.makedirs(output_dir, exist_ok=True)
@@ -297,25 +305,26 @@ def split_and_save_csv(trajectory_df, output_dir):
         chunk_df.to_csv(file_path, index=False, encoding="utf-8")
         print(f"💾 保存切片文件：{filename}（{len(chunk_df)} 条记录）")
 
-    # 生成manifest.json（总索引文件）
-    manifest = {
-        "scenario_name": "rescue_mission_2026_v1",
-        "t0_utc": T0_UTC.strftime("%Y-%m-%d %H:%M:%S"),
-        "sim_duration_sec": SIM_DURATION_SEC,
-        "sat_count": MAX_SAT_COUNT,
-        "trace_files": [
-            f"sat_trace_{chunk_idx*CHUNK_DURATION_SEC*MS_PER_SEC}_"
-            f"{(chunk_idx+1)*CHUNK_DURATION_SEC*MS_PER_SEC - 1}_{RESELECT_SAT_COUNT}.csv"
-            for chunk_idx in range(total_chunks)
-        ]
-    }
-    manifest_path = os.path.join(
-        os.path.dirname(output_dir), "manifest.json"
-    )
-    import json
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
-    print(f"📋 生成索引文件：manifest.json")
+    if make_manifest:
+        # 生成manifest.json（总索引文件）
+        manifest = {
+            "scenario_name": "rescue_mission_2026_v1",
+            "t0_utc": T0_UTC.strftime("%Y-%m-%d %H:%M:%S"),
+            "sim_duration_sec": SIM_DURATION_SEC,
+            "sat_count": MAX_SAT_COUNT,
+            "trace_files": [
+                f"sat_trace_{chunk_idx*CHUNK_DURATION_SEC*MS_PER_SEC}_"
+                f"{(chunk_idx+1)*CHUNK_DURATION_SEC*MS_PER_SEC - 1}_{RESELECT_SAT_COUNT}.csv"
+                for chunk_idx in range(total_chunks)
+            ]
+        }
+        manifest_path = os.path.join(
+            os.path.dirname(output_dir), "manifest.json"
+        )
+        import json
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+        print(f"📋 生成索引文件：manifest.json")
 
 def validate_trajectory_data(df):
     """
@@ -391,10 +400,17 @@ if __name__ == "__main__":
 
         trajectory_df = calculate_dynamic_sat_trajectory(all_starlink_sats, ts, t0, observer)
         validate_trajectory_data(trajectory_df)
+        # 输出到 S3 模块
         output_dir = os.path.join(OUTPUT_BASE, f"sat_trace_{RESELECT_SAT_COUNT}")
         os.makedirs(output_dir, exist_ok=True)
-        print(f"📁 本次输出目录：{output_dir}")
-        split_and_save_csv(trajectory_df, output_dir)
+        print(f"📁 S3 输出目录：{output_dir}")
+        split_and_save_csv(trajectory_df, output_dir, make_manifest=True)
+
+        # 同时输出到 vis 前端
+        vis_dir = VIS_SAT_TRACE_DIR
+        os.makedirs(vis_dir, exist_ok=True)
+        print(f"📁 vis 前端输出目录：{vis_dir}")
+        split_and_save_csv(trajectory_df, vis_dir, make_manifest=False)
 
         '''
         # 2. 筛选卫星并生成元数据
@@ -412,8 +428,9 @@ if __name__ == "__main__":
 
         print("\n" + "="*60)
         print("🎉 卫星轨迹生成完成！")
-        print(f"📁 输出目录：{output_dir}")
-        print(f"📦 生成文件数：{SIM_DURATION_SEC // CHUNK_DURATION_SEC} 个CSV切片 + 1个manifest.json")
+        print(f"📁 S3 输出目录：{output_dir}")
+        print(f"📁 vis 前端目录：{vis_dir}")
+        print(f"📦 生成文件数：{SIM_DURATION_SEC // CHUNK_DURATION_SEC} 个CSV切片 × 2 处 + 1个manifest.json")
         print("="*60)
 
     except Exception as e:
