@@ -9,7 +9,7 @@ import json
 import datetime
 import pandas as pd
 
-from generate import generate_sar_traffic, generate_uav_requests
+from generate import generate_sar_traffic
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -210,31 +210,13 @@ def run():
     uav_list = [f'UAV_{i+1:02d}' for i in range(uav_n)]
     main_gs = 'GS_01'
 
-    # 注册所有内容到系统中
+    # 注册所有内容到系统中（存储在 GS 端，UAV 发起请求，匹配 S3 UAV→GS 路由方向）
     for uav in uav_list:
-        # UAV→GS 照片上传（存储在 GS 端，UAV 发起请求，匹配 S3 路由方向）
         engine.AddContent(target=main_gs, filename=f'photo_upload_{uav}', filesize=12.0)
-        # UAV→GS 遥测上传
         engine.AddContent(target=main_gs, filename=f'telemetry_upload_{uav}', filesize=0.1)
-        # UAV 间通信内容
-        engine.AddContent(target=uav, filename=f'status_update_{uav}', filesize=0.2)
-        engine.AddContent(target=uav, filename=f'fuel_status_{uav}', filesize=0.1)
 
-    # 全局共享内容（UAV 间）
-    engine.AddContent(target=main_gs, filename='target_location_update', filesize=0.3)
-    engine.AddContent(target=main_gs, filename='emergency_assistance', filesize=0.1)
-
-    # 无人机协作请求内容
-    for uav in uav_list:
-        for partner in uav_list:
-            if uav != partner:
-                engine.AddContent(target=uav, filename=f'collaboration_request_{partner}', filesize=0.2)
-
-    # 生成请求并合并排序
-    sar_requests = generate_sar_traffic(uav_list, main_gs, max_time_ms=600000)
-    uav_requests = generate_uav_requests(uav_list, max_time_ms=600000)
-    reqs = sar_requests + uav_requests
-    reqs.sort(key=lambda x: x['time'])
+    # 生成请求
+    reqs = generate_sar_traffic(uav_list, main_gs, max_time_ms=600000)
 
     csv_files = GetAllFiles(cf.csv_dir)
     rules_files = GetAllFiles(cf.rules_dir)
