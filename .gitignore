@@ -1,8 +1,44 @@
-# dirs
+# ======================== 依赖与构建产物 ========================
+# Node.js 依赖（npm install 自动生成）
 node_modules/
-vis/*.csv
+# Python 编译缓存
 __pycache__/
-logs/
+# UV 包管理器锁文件
 uv.lock
+# Python 版本指定文件
 .python-version
-src/S4/out_put/
+
+# ======================== S1 卫星轨迹生成输出 ========================
+# 输出目录：src/S3/traces/sat_trace_{N}/
+src/S3/traces/sat_trace_*/
+
+# ======================== S2 无人机轨迹生成输出 ========================
+# 输出目录：src/S3/traces/uav_trace_{N}/
+src/S3/traces/uav_trace_*/
+
+# ======================== S3 链路拓扑生成输出 ========================
+# 输出目录：src/S3/outputs/output_{m}_{n}/
+# 包含 topology_links_*.csv 和 routing_rules_*.json
+src/S3/outputs/
+
+# ======================== S4 网络节点生成输出 ========================
+# 输出目录：src/S4/output/output_{m}_{n}/
+# 包含 networks_*.csv
+src/S4/output/
+
+# ======================== vis 前端导入数据 ========================
+# 前端运行时会从 public/data/ 下读取 CSV 数据
+# 这些文件由 S1~S4 模块生成，或用户手动导入
+# 保留目录结构，只忽略生成的 CSV 文件
+
+src/vis/public/data/sat_trace/*.csv
+src/vis/public/data/uav_trace/*.csv
+src/vis/public/data/topology_links/*.csv
+src/vis/public/data/networks/*.csv
+
+# ======================== 日志与其他 ========================
+logs/
+# 旧版 manifest 索引（不再生成）
+src/S3/traces/*.json
+# vis 根目录残留 csv
+src/vis/*.csv

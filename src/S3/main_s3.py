@@ -17,6 +17,14 @@ from scipy.spatial import cKDTree
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TRACES_BASE = os.path.join(SCRIPT_DIR, "traces")
 OUTPUTS_BASE = os.path.join(SCRIPT_DIR, "outputs")
+VIS_TOPOLOGY_DIR = os.path.join(SCRIPT_DIR, "..", "vis", "public", "data", "topology_links")
+
+# 从环境变量加载用户配置（前端传入，跳过交互选择）
+_S3_CONFIG_FILE = os.environ.get('S3_CONFIG_FILE', '')
+_S3_CONFIG = None
+if _S3_CONFIG_FILE and os.path.exists(_S3_CONFIG_FILE):
+    with open(_S3_CONFIG_FILE, 'r', encoding='utf-8') as _f:
+        _S3_CONFIG = json.load(_f)
 
 MAX_LINK_RANGE = 5000 * 1000
 MIN_ELEVATION_DEG = 10.0
@@ -89,23 +97,18 @@ class TopologyCache:
 
 def scan_trace_dirs():
     """掃描 traces/ 下可用的 sat_trace_n 與 uav_trace_n 子目錄"""
-    sat_base = os.path.join(TRACES_BASE, "sat_trace")
-    uav_base = os.path.join(TRACES_BASE, "uav_trace")
-
     sat_dirs = {}
-    if os.path.isdir(sat_base):
-        for d in os.listdir(sat_base):
-            full = os.path.join(sat_base, d)
-            if d.startswith("sat_trace_") and os.path.isdir(full):
+    uav_dirs = {}
+    if os.path.isdir(TRACES_BASE):
+        for d in os.listdir(TRACES_BASE):
+            full = os.path.join(TRACES_BASE, d)
+            if not os.path.isdir(full):
+                continue
+            if d.startswith("sat_trace_"):
                 suffix = d.replace("sat_trace_", "", 1)
                 if suffix.isdigit():
                     sat_dirs[int(suffix)] = full
-
-    uav_dirs = {}
-    if os.path.isdir(uav_base):
-        for d in os.listdir(uav_base):
-            full = os.path.join(uav_base, d)
-            if d.startswith("uav_trace_") and os.path.isdir(full):
+            elif d.startswith("uav_trace_"):
                 suffix = d.replace("uav_trace_", "", 1)
                 if suffix.isdigit():
                     uav_dirs[int(suffix)] = full
@@ -361,7 +364,7 @@ def generate_routing_rules(active_links, time_ms, active_nodes, node_ip_map):
     return rules
 
 
-def save_chunk(output_link_dir, output_rule_dir, chunk_idx, start_ms, end_ms, chunk_links, chunk_rules):
+def save_chunk(output_link_dir, output_rule_dir, chunk_idx, start_ms, end_ms, chunk_links, chunk_rules, vis_link_dir=None):
     link_filename = f"topology_links_{start_ms}_{end_ms}.csv"
     rule_filename = f"routing_rules_{start_ms}_{end_ms}.json"
 
@@ -385,6 +388,10 @@ def save_chunk(output_link_dir, output_rule_dir, chunk_idx, start_ms, end_ms, ch
             if col not in df_links.columns:
                 df_links[col] = None
         df_links[columns].to_csv(os.path.join(output_link_dir, link_filename), index=False)
+        # 同时输出到 vis 前端
+        if vis_link_dir:
+            os.makedirs(vis_link_dir, exist_ok=True)
+            df_links[columns].to_csv(os.path.join(vis_link_dir, link_filename), index=False)
 
     payload = {"meta": {"chunk_id": chunk_idx, "version": "standalone-v1"}, "rules": chunk_rules}
     with open(os.path.join(output_rule_dir, rule_filename), "w", encoding="utf-8") as handle:
@@ -393,84 +400,91 @@ def save_chunk(output_link_dir, output_rule_dir, chunk_idx, start_ms, end_ms, ch
 
 def main():
     parser = argparse.ArgumentParser(description="Standalone optimized S3 routing script")
-    parser.add_argument(“--sat-dir”, default=None, help=”直接指定 sat_trace 子目錄路徑（跳過互動選擇）”)
-    parser.add_argument(“--uav-dir”, default=None, help=”直接指定 uav_trace 子目錄路徑（跳過互動選擇）”)
-    parser.add_argument(“--max-steps”, type=int, default=None)
-    parser.add_argument(“--no-save”, action=”store_true”)
+    parser.add_argument("--sat-dir", default=None, help="直接指定 sat_trace 子目錄路徑（跳過互動選擇）")
+    parser.add_argument("--uav-dir", default=None, help="直接指定 uav_trace 子目錄路徑（跳過互動選擇）")
+    parser.add_argument("--max-steps", type=int, default=None)
+    parser.add_argument("--no-save", action="store_true")
     args = parser.parse_args()
 
     # ── 1. 掃描可用資料夾 ──
     sat_dirs, uav_dirs = scan_trace_dirs()
 
-    if args.sat_dir:
+    # 優先使用 env 配置（前端傳入），其次為 CLI args，最後互動選擇
+    if _S3_CONFIG and 'sat_n' in _S3_CONFIG:
+        sat_n = int(_S3_CONFIG['sat_n'])
+        sat_path = sat_dirs.get(sat_n, os.path.join(TRACES_BASE, f"sat_trace_{sat_n}"))
+    elif args.sat_dir:
         sat_path = args.sat_dir
         sat_n = get_satellite_scale_label(sat_path)
     else:
         if not sat_dirs:
-            print(“[Error] traces/sat_trace/ 下沒有任何 sat_trace_n 目錄，請先執行 S1”)
+            print("[Error] traces/ 下沒有任何 sat_trace_n 目錄，請先執行 S1")
             return
-        print(“\n可用的 sat_trace_n 目錄：”)
+        print("\n可用的 sat_trace_n 目錄：")
         for n in sorted(sat_dirs):
-            print(f”  sat_trace_{n}”)
+            print(f"  sat_trace_{n}")
         while True:
             try:
-                choice = input(“請輸入要使用的 sat n (數量): “).strip()
+                choice = input("請輸入要使用的 sat n (數量): ").strip()
                 sat_n = int(choice)
                 if sat_n in sat_dirs:
                     sat_path = sat_dirs[sat_n]
                     break
-                print(f”  無效選擇，可用 n: {sorted(sat_dirs)}”)
+                print(f"  無效選擇，可用 n: {sorted(sat_dirs)}")
             except (ValueError, EOFError, KeyboardInterrupt):
-                print(“\n[Exit]”)
+                print("\n[Exit]")
                 return
 
-    if args.uav_dir:
+    if _S3_CONFIG and 'uav_n' in _S3_CONFIG:
+        uav_n = int(_S3_CONFIG['uav_n'])
+        uav_path = uav_dirs.get(uav_n, os.path.join(TRACES_BASE, f"uav_trace_{uav_n}"))
+    elif args.uav_dir:
         uav_path = args.uav_dir
         uav_n = get_satellite_scale_label(uav_path)
     else:
         if not uav_dirs:
-            print(“[Error] traces/uav_trace/ 下沒有任何 uav_trace_n 目錄，請先執行 S2”)
+            print("[Error] traces/ 下沒有任何 uav_trace_n 目錄，請先執行 S2")
             return
-        print(“\n可用的 uav_trace_n 目錄：”)
+        print("\n可用的 uav_trace_n 目錄：")
         for n in sorted(uav_dirs):
-            print(f”  uav_trace_{n}”)
+            print(f"  uav_trace_{n}")
         while True:
             try:
-                choice = input(“請輸入要使用的 uav n (數量): “).strip()
+                choice = input("請輸入要使用的 uav n (數量): ").strip()
                 uav_n = int(choice)
                 if uav_n in uav_dirs:
                     uav_path = uav_dirs[uav_n]
                     break
-                print(f”  無效選擇，可用 n: {sorted(uav_dirs)}”)
+                print(f"  無效選擇，可用 n: {sorted(uav_dirs)}")
             except (ValueError, EOFError, KeyboardInterrupt):
-                print(“\n[Exit]”)
+                print("\n[Exit]")
                 return
 
-    print(f”\n🛰️  使用 sat : {sat_path}”)
-    print(f”🚁 使用 uav : {uav_path}”)
+    print(f"\n🛰️  使用 sat : {sat_path}")
+    print(f"🚁 使用 uav : {uav_path}")
 
     # ── 2. 載入資料 ──
     df_sat, df_uav, timelines = load_and_merge_traces(sat_path, uav_path)
     if df_sat.empty:
-        print(f”[Error] 無衛星資料：{sat_path}”)
+        print(f"[Error] 無衛星資料：{sat_path}")
         return
     if not timelines:
-        print(f”[Error] 無 UAV 時間軸：{uav_path}”)
+        print(f"[Error] 無 UAV 時間軸：{uav_path}")
         return
 
     if args.max_steps is not None:
         timelines = timelines[: args.max_steps]
 
     # ── 3. 輸出目錄 output_m_n ──
-    output_root = os.path.join(OUTPUTS_BASE, f”output_{sat_n}_{uav_n}”)
-    output_link_dir = os.path.join(output_root, “links”)
-    output_rule_dir = os.path.join(output_root, “rules”)
+    output_root = os.path.join(OUTPUTS_BASE, f"output_{sat_n}_{uav_n}")
+    output_link_dir = os.path.join(output_root, "links")
+    output_rule_dir = os.path.join(output_root, "rules")
     if not args.no_save:
         if os.path.exists(output_root):
             shutil.rmtree(output_root)
         os.makedirs(output_link_dir, exist_ok=True)
         os.makedirs(output_rule_dir, exist_ok=True)
-    print(f”📁 輸出目錄：{output_root}”)
+    print(f"📁 輸出目錄：{output_root}")
 
     # ── 4. 計算拓撲與路由 ──
     node_ip_map = build_node_ip_map(df_sat, df_uav)
@@ -484,30 +498,30 @@ def main():
     for step_idx, t in enumerate(timelines):
         time_ms = int(t)
         nodes_df = get_nodes_at_timestamp(df_sat, df_uav, time_ms)
-        active_nodes = nodes_df[“node_id”].values if not nodes_df.empty else []
+        active_nodes = nodes_df["node_id"].values if not nodes_df.empty else []
 
         if step_idx - last_topo_step >= TOPO_HASH_INTERVAL or step_idx == 0:
             links = compute_topology(nodes_df, time_ms)
 
             if topo_cache.last_topology:
                 current_keys = {
-                    (l[“src”], l[“dst”]) if l[“src”] < l[“dst”] else (l[“dst”], l[“src”])
+                    (l["src"], l["dst"]) if l["src"] < l["dst"] else (l["dst"], l["src"])
                     for l in links
-                    if l.get(“status”, “UP”) == “UP”
+                    if l.get("status", "UP") == "UP"
                 }
                 for old_link in topo_cache.last_topology:
-                    if old_link.get(“status”, “UP”) != “UP”:
+                    if old_link.get("status", "UP") != "UP":
                         continue
                     old_key = (
-                        (old_link[“src”], old_link[“dst”])
-                        if old_link[“src”] < old_link[“dst”]
-                        else (old_link[“dst”], old_link[“src”])
+                        (old_link["src"], old_link["dst"])
+                        if old_link["src"] < old_link["dst"]
+                        else (old_link["dst"], old_link["src"])
                     )
                     if old_key not in current_keys:
                         broken = old_link.copy()
-                        broken[“time_ms”] = time_ms
-                        broken[“status”] = “DOWN”
-                        broken[“delay_ms”] = 99999.0
+                        broken["time_ms"] = time_ms
+                        broken["status"] = "DOWN"
+                        broken["delay_ms"] = 99999.0
                         links.append(broken)
 
             topo_cache.last_topology = links
@@ -517,10 +531,10 @@ def main():
             links = []
             for old_link in topo_cache.last_topology or []:
                 copied = old_link.copy()
-                copied[“time_ms”] = time_ms
+                copied["time_ms"] = time_ms
                 links.append(copied)
 
-        active_links = [link for link in links if link.get(“status”, “UP”) == “UP”]
+        active_links = [link for link in links if link.get("status", "UP") == "UP"]
         new_rules = generate_routing_rules(active_links, time_ms, active_nodes, node_ip_map)
 
         chunk_links.extend(links)
@@ -531,14 +545,14 @@ def main():
         if is_last_step or int(next_t / chunk_size_ms) > int(time_ms / chunk_size_ms):
             if not args.no_save:
                 start_ms = chunk_idx * chunk_size_ms
-                save_chunk(output_link_dir, output_rule_dir, chunk_idx, start_ms, time_ms, chunk_links, chunk_rules)
+                save_chunk(output_link_dir, output_rule_dir, chunk_idx, start_ms, time_ms, chunk_links, chunk_rules, vis_link_dir=VIS_TOPOLOGY_DIR)
             chunk_links = []
             chunk_rules = []
             chunk_idx += 1
 
-    print(f”[Done] output_{sat_n}_{uav_n} 完成。”)
+    print(f"[Done] output_{sat_n}_{uav_n} 完成。")
 
 
-if __name__ == “__main__”:
+if __name__ == "__main__":
     main()
 

@@ -3,10 +3,69 @@ import sys
 import csv
 import math
 import random
+import json
+import subprocess
 from pymap3d import enu2ecef  # 用于将站心坐标系(ENU)转换为地心轴坐标系(ECEF)
 
-# 将 SAREnv 目录加入搜寻路径，使 main_s2.py 可放在 S2/ 下执行
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "SAREnv"))
+# ======================== SAREnv 自动安装 ========================
+SARENV_REPO_URL = "https://github.com/namurproject/SAREnv.git" 
+
+S2_DIR = os.path.dirname(os.path.abspath(__file__))
+SARENV_DIR = os.path.join(S2_DIR, "SAREnv")
+sys.path.insert(0, SARENV_DIR)
+
+def _ensure_sarenv():
+    """自动检测并安装 sarenv 包"""
+    # 先尝试直接导入
+    sarenv_path = os.path.join(SARENV_DIR, "sarenv")
+    if os.path.isdir(sarenv_path):
+        return  # 已存在
+
+    print("[S2] sarenv 未安装，正在自动下载...")
+    print(f"     仓库: {SARENV_REPO_URL}")
+
+    # 若 SAREnv 目录非空则先清理
+    if os.path.isdir(SARENV_DIR) and os.listdir(SARENV_DIR):
+        import shutil
+        for item in os.listdir(SARENV_DIR):
+            item_path = os.path.join(SARENV_DIR, item)
+            if os.path.isdir(item_path):
+                shutil.rmtree(item_path, ignore_errors=True)
+            else:
+                os.remove(item_path)
+
+    # Clone 仓库到临时目录，再移动到 SAREnv/
+    tmp_dir = os.path.join(S2_DIR, "_sarenv_tmp")
+    try:
+        subprocess.run(
+            ["git", "clone", SARENV_REPO_URL, tmp_dir],
+            check=True, capture_output=True, text=True
+        )
+        # 安装依赖
+        req_file = os.path.join(tmp_dir, "requirements.txt")
+        if os.path.exists(req_file):
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", req_file],
+                check=True
+            )
+        # pip install -e .
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-e", tmp_dir],
+            check=True
+        )
+        print("[S2] sarenv 安装成功！")
+    except subprocess.CalledProcessError as e:
+        print(f"[S2] 自动安装失败: {e}")
+        print(f"[S2] 请手动执行:")
+        print(f"      git clone {SARENV_REPO_URL}")
+        print(f"      cd sarenv && pip install -r requirements.txt && pip install -e .")
+        sys.exit(1)
+    finally:
+        if os.path.isdir(tmp_dir):
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+_ensure_sarenv()
 
 import sarenv
 from sarenv.analytics.paths import generate_spiral_path  # 专门用于搜救场景的螺旋路径生成函数
@@ -26,6 +85,22 @@ UAV_SPEED_MPS = 15         # 15m/s 恒定巡航速度
 
 TIME_STEP_MS = 100         # 100ms 采样周期 (10Hz)
 TOTAL_DURATION_MS = 600000 # 10 分钟模拟时长 (10 * 60 * 1000)
+
+# 从环境变量加载用户配置（前端传入，覆盖默认值）
+_S2_CONFIG_FILE = os.environ.get('S2_CONFIG_FILE', '')
+if _S2_CONFIG_FILE and os.path.exists(_S2_CONFIG_FILE):
+    with open(_S2_CONFIG_FILE, 'r', encoding='utf-8') as _f:
+        _cfg = json.load(_f)
+    if 'anchor_lat' in _cfg:     ANCHOR_LAT = float(_cfg['anchor_lat'])
+    if 'anchor_lon' in _cfg:     ANCHOR_LON = float(_cfg['anchor_lon'])
+    if 'anchor_alt' in _cfg:     ANCHOR_ALT = float(_cfg['anchor_alt'])
+    if 'num_uavs' in _cfg:       NUM_UAVS = int(_cfg['num_uavs'])
+    if 'search_radius' in _cfg:  SEARCH_RADIUS_M = float(_cfg['search_radius'])
+    if 'altitude' in _cfg:       ALTITUDE_M = float(_cfg['altitude'])
+    if 'detection_range' in _cfg: DETECTION_RANGE_M = float(_cfg['detection_range'])
+    if 'uav_speed' in _cfg:      UAV_SPEED_MPS = float(_cfg['uav_speed'])
+    if 'duration_ms' in _cfg:    TOTAL_DURATION_MS = int(_cfg['duration_ms'])
+    print(f"✅ 已加载用户配置: UAV={NUM_UAVS}, DUR={TOTAL_DURATION_MS}ms, OBS=({ANCHOR_LAT},{ANCHOR_LON},{ANCHOR_ALT})")
 
 # -------------------------
 # 2. 受害者生成逻辑 (Victim Generation)
@@ -110,9 +185,10 @@ uav_results = [process_uav_mission(p, victims_enu) for p in spiral_paths]
 # 5. 导出切片 CSV (Export Data)
 # -------------------------
 
-# 获取当前脚本的绝对路径，向上退一级到 src，再进入 S3/traces/uav_trace
+# 获取当前脚本的绝对路径，向上退一级到 src，再进入对应目录
 current_dir = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_BASE = os.path.abspath(os.path.join(current_dir, "..", "S3", "traces", "uav_trace"))
+OUTPUT_BASE = os.path.abspath(os.path.join(current_dir, "..", "S3", "traces"))
+VIS_UAV_TRACE_DIR = os.path.abspath(os.path.join(current_dir, "..", "vis", "public", "data", "uav_trace"))
 
 CHUNK_DURATION_MS = 60000  # 每个切片 60 秒
 GS_ECEF = enu2ecef(0, 0, 0, ANCHOR_LAT, ANCHOR_LON, ANCHOR_ALT, deg=True)
@@ -120,7 +196,7 @@ fieldnames = ["time_ms", "node_id", "role", "type", "ecef_x", "ecef_y", "ecef_z"
 
 
 def split_and_save_uav_csv(uav_results, output_dir):
-    """按60秒切片保存 UAV CSV，并生成 manifest.json"""
+    """按60秒切片保存 UAV CSV"""
     os.makedirs(output_dir, exist_ok=True)
     total_chunks = TOTAL_DURATION_MS // CHUNK_DURATION_MS
 
@@ -161,33 +237,17 @@ def split_and_save_uav_csv(uav_results, output_dir):
 
         print(f"💾 保存切片文件：{filename}")
 
-    # 生成 manifest.json
-    manifest = {
-        "scenario_name": "rescue_mission_2026_v1",
-        "anchor_lat": ANCHOR_LAT,
-        "anchor_lon": ANCHOR_LON,
-        "anchor_alt": ANCHOR_ALT,
-        "sim_duration_ms": TOTAL_DURATION_MS,
-        "uav_count": NUM_UAVS,
-        "trace_files": [
-            f"uav_trace_{chunk_idx * CHUNK_DURATION_MS}_"
-            f"{min((chunk_idx + 1) * CHUNK_DURATION_MS - 1, TOTAL_DURATION_MS - 1)}_{NUM_UAVS}.csv"
-            for chunk_idx in range(total_chunks)
-        ]
-    }
-    manifest_path = os.path.join(
-        os.path.dirname(output_dir), "manifest.json"
-    )
-    import json
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
-    print(f"📋 生成索引文件：manifest.json")
 
-
-# 以无人机数量作为子目录名
+# 输出到 S3 模块
 OUTPUT_DIR = os.path.join(OUTPUT_BASE, f"uav_trace_{NUM_UAVS}")
-print(f"[S4] 正在导出切片 CSV 至: {OUTPUT_DIR}")
+print(f"[S4] 正在导出切片 CSV 至 S3: {OUTPUT_DIR}")
 split_and_save_uav_csv(uav_results, OUTPUT_DIR)
+
+# 同时输出到 vis 前端
+vis_dir = VIS_UAV_TRACE_DIR
+os.makedirs(vis_dir, exist_ok=True)
+print(f"[S4] 正在导出切片 CSV 至 vis: {vis_dir}")
+split_and_save_uav_csv(uav_results, vis_dir)
 
 print("\n" + "="*30)
 for i, (_, count) in enumerate(uav_results):

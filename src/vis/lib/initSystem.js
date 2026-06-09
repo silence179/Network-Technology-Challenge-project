@@ -40,7 +40,18 @@ export async function initSystem(viewer) {
             '/data/topology_links/topology_links_480000_539900.csv',
             '/data/topology_links/topology_links_540000_599900.csv'
         ];
-        const uavFile = ['/data/uav_trace/uav_trace_full.csv'];
+        // 动态获取无人机轨迹文件列表
+        let uavFile = [];
+        try {
+            const uavRes = await fetch('/api/list-files?folder=uav');
+            if (uavRes.ok) {
+                const uavNames = await uavRes.json();
+                uavFile = uavNames.map(f => `/data/uav_trace/${f}`);
+                console.log(`[initSystem] 发现 ${uavFile.length} 个无人机轨迹文件`);
+            }
+        } catch (e) {
+            console.warn('[initSystem] 无法获取无人机文件列表', e);
+        }
 
         // 辅助函数：加载多个CSV文件并合并数据
         const loadMultipleCSV = async (filePaths) => {

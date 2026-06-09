@@ -6,6 +6,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import requests
 import os
+import json
 
 # ======================== 全局配置（需与S2协商确认）========================
 # 1. 时间配置（T0时刻：仿真起始时间，与S2保持一致）
@@ -22,7 +23,6 @@ OBS_ELE = 459.0  # 救援中心海拔（米）
 # 3. 卫星筛选配置
 MIN_ALT_DEG = 0  # 最小仰角（地平线以上）
 MAX_DIST_KM = 2000  # 最大距离（2000km）
-MAX_SAT_COUNT = 25  # 最终输出卫星数量
 IP_PREFIX = "10.0.3."  # 卫星IP前缀
 
 # 4. 文件配置
@@ -36,9 +36,8 @@ TLE_FILE = os.path.join(CODE_DIR, "starlink.tle") # 本地TLE文件路径
 OUTPUT_BASE = os.path.join(
     PARENT_DIR,
     "S3",
-    "traces",
-    "sat_trace"
-)  # 输出根目录（S3模块用）
+    "traces"
+)  # 输出根目录（S3模块用，子目录为 sat_trace_{N}）
 VIS_SAT_TRACE_DIR = os.path.join(
     PARENT_DIR,
     "vis",
@@ -50,7 +49,22 @@ CHUNK_DURATION_SEC = 60  # 每个文件的时间切片（60秒）
 
 # 5. 动态筛选配置
 DYNAMIC_FILTER_INTERVAL_SEC = 60  # 动态筛选时间窗口（每60秒重新筛选一次）
-RESELECT_SAT_COUNT = 40  # 每次动态筛选保留的卫星数
+RESELECT_SAT_COUNT = 40  # 每次动态筛选保留的卫星数（可被环境变量覆盖）
+
+# 从环境变量加载用户配置（前端传入，覆盖以上默认值）
+_S1_CONFIG_FILE = os.environ.get('S1_CONFIG_FILE', '')
+if _S1_CONFIG_FILE and os.path.exists(_S1_CONFIG_FILE):
+    with open(_S1_CONFIG_FILE, 'r', encoding='utf-8') as _f:
+        _cfg = json.load(_f)
+    if 'duration' in _cfg:     SIM_DURATION_SEC = int(_cfg['duration'])
+    if 'obs_lat' in _cfg:      OBS_LAT = float(_cfg['obs_lat'])
+    if 'obs_lon' in _cfg:      OBS_LON = float(_cfg['obs_lon'])
+    if 'obs_ele' in _cfg:      OBS_ELE = float(_cfg['obs_ele'])
+    if 'reselect_count' in _cfg: RESELECT_SAT_COUNT = int(_cfg['reselect_count'])
+    if 'min_alt' in _cfg:      MIN_ALT_DEG = float(_cfg['min_alt'])
+    if 'max_dist' in _cfg:     MAX_DIST_KM = float(_cfg['max_dist'])
+    if 'chunk_duration' in _cfg: CHUNK_DURATION_SEC = int(_cfg['chunk_duration'])
+    print(f"✅ 已加载用户配置: RESELECT={RESELECT_SAT_COUNT}, DUR={SIM_DURATION_SEC}s, OBS=({OBS_LAT},{OBS_LON},{OBS_ELE})")
 
 # ======================== 工具函数 ========================
 '''
@@ -133,48 +147,6 @@ def filter_visible_satellites(all_starlink_sats, observer, current_t):
         })
     return sat_metadata
 
-def load_and_filter_satellites(t0, observer): #旧的筛选逻辑，静态筛选
-    """
-    加载TLE数据并筛选符合条件的卫星
-    筛选逻辑：T0时刻仰角>0° 或 距离<2000km，按距离排序取前MAX_SAT_COUNT颗
-    """
-    # 加载所有卫星
-    satellites = load.tle_file(TLE_FILE)
-    starlink_sats = [sat for sat in satellites if "STARLINK" in sat.name.upper()]
-    print(f"📡 加载到 {len(starlink_sats)} 颗Starlink卫星")
-
-    # 筛选可见卫星
-    visible_sats = []
-    for sat in starlink_sats:
-        diff = sat - observer
-        topo = diff.at(t0)
-        alt_deg = topo.altaz()[0].degrees
-        dist_km = topo.distance().km
-
-        # 满足任一条件即保留
-        if alt_deg > MIN_ALT_DEG or dist_km < MAX_DIST_KM:
-            visible_sats.append((dist_km, sat))
-
-    # 按距离排序，取前N颗
-    visible_sats_sorted = sorted(visible_sats, key=lambda x: x[0])
-    selected_sats = visible_sats_sorted[:MAX_SAT_COUNT]
-    print(f"✅ 筛选出 {len(selected_sats)} 颗符合条件的卫星（按距离排序）")
-
-    # 生成卫星元数据（ID、IP等）
-    sat_metadata = []
-    for idx, (dist_km, sat) in enumerate(selected_sats, 1):
-        sat_id = f"SAT_{idx:02d}"
-        ip = f"{IP_PREFIX}{idx}"
-        # orbit_id暂填-1（可后续优化）
-        sat_metadata.append({
-            "node_id": sat_id,
-            "name": sat.name.strip(),
-            "ip": ip,
-            "orbit_id": -1,
-            "satellite_obj": sat
-        })
-    return sat_metadata
-
 def calculate_dynamic_sat_trajectory(all_starlink_sats, ts, t0, observer):
     """
     动态计算卫星轨迹：每DYNAMIC_FILTER_INTERVAL_SEC秒重新筛选可见卫星
@@ -228,103 +200,28 @@ def calculate_dynamic_sat_trajectory(all_starlink_sats, ts, t0, observer):
     print(f"📊 完成 {total_steps} 个时间步的轨迹计算，共 {len(all_traces)} 条记录")
     return pd.DataFrame(all_traces)
 
-def calculate_sat_trajectory(sat_metadata, ts, t0): #旧的轨迹计算
-    """
-    计算卫星轨迹：生成每个时间步的ECEF坐标（米）和高度（千米）
-    """
-    all_traces = []
-    total_steps = SIM_DURATION_SEC // TIME_STEP_SEC
-
-    for step in range(total_steps):
-        # 当前时间（秒级）
-        current_sec = step * TIME_STEP_SEC
-        current_time_ms = current_sec * MS_PER_SEC
-        # 转换为Skyfield时间对象
-        current_t = t0 + timedelta(seconds=current_sec)
-
-        # 计算每颗卫星的坐标
-        for sat_info in sat_metadata:
-            sat = sat_info["satellite_obj"]
-            # 获取地心坐标（GCRS惯性系），转换为ITRS地固系（ECEF）
-            geocentric = sat.at(current_t)
-            ecef_xyz_m = geocentric.frame_xyz(itrs).m  # 单位：米
-            ecef_x, ecef_y, ecef_z = ecef_xyz_m
-
-            # 计算高度（千米）
-            subpoint = wgs84.subpoint(geocentric)
-            altitude_km = subpoint.elevation.km
-
-            # 组装轨迹数据（严格遵循项目文件格式）
-            trace = {
-                "time_ms": current_time_ms,
-                "node_id": sat_info["node_id"],
-                "name": sat_info["name"],
-                "type": "SAT",
-                "ecef_x": round(ecef_x, 2),
-                "ecef_y": round(ecef_y, 2),
-                "ecef_z": round(ecef_z, 2),
-                "altitude_km": round(altitude_km, 2),
-                "orbit_id": sat_info["orbit_id"],
-                "ip": sat_info["ip"]
-            }
-            all_traces.append(trace)
-
-    print(f"📊 完成 {total_steps} 个时间步的轨迹计算，共 {len(all_traces)} 条记录")
-    return pd.DataFrame(all_traces)
-
-def split_and_save_csv(trajectory_df, output_dir, make_manifest=True):
-    """
-    按60秒切片保存CSV文件
-    文件名格式：sat_trace_{startMs}_{endMs}.csv
-    make_manifest: 是否在上级目录生成 manifest.json（S3需要，vis不需要）
-    """
-    # 创建输出目录（如果不存在）
+def split_and_save_csv(trajectory_df, output_dir):
+    """按60秒切片保存CSV文件"""
     os.makedirs(output_dir, exist_ok=True)
 
-    # 计算切片数量
     total_chunks = SIM_DURATION_SEC // CHUNK_DURATION_SEC
 
     for chunk_idx in range(total_chunks):
-        # 切片时间范围（毫秒）
         start_sec = chunk_idx * CHUNK_DURATION_SEC
         end_sec = start_sec + CHUNK_DURATION_SEC
         start_ms = start_sec * MS_PER_SEC
-        end_ms = end_sec * MS_PER_SEC - 1  # 闭区间：[startMs, endMs]
+        end_ms = end_sec * MS_PER_SEC - 1
 
-        # 筛选当前切片的数据
         chunk_df = trajectory_df[
             (trajectory_df["time_ms"] >= start_ms) &
             (trajectory_df["time_ms"] < end_ms + 1)
         ]
 
-        # 文件名
         filename = f"sat_trace_{start_ms}_{end_ms}_{RESELECT_SAT_COUNT}.csv"
         file_path = os.path.join(output_dir, filename)
 
-        # 保存CSV（不保留索引）
         chunk_df.to_csv(file_path, index=False, encoding="utf-8")
         print(f"💾 保存切片文件：{filename}（{len(chunk_df)} 条记录）")
-
-    if make_manifest:
-        # 生成manifest.json（总索引文件）
-        manifest = {
-            "scenario_name": "rescue_mission_2026_v1",
-            "t0_utc": T0_UTC.strftime("%Y-%m-%d %H:%M:%S"),
-            "sim_duration_sec": SIM_DURATION_SEC,
-            "sat_count": MAX_SAT_COUNT,
-            "trace_files": [
-                f"sat_trace_{chunk_idx*CHUNK_DURATION_SEC*MS_PER_SEC}_"
-                f"{(chunk_idx+1)*CHUNK_DURATION_SEC*MS_PER_SEC - 1}_{RESELECT_SAT_COUNT}.csv"
-                for chunk_idx in range(total_chunks)
-            ]
-        }
-        manifest_path = os.path.join(
-            os.path.dirname(output_dir), "manifest.json"
-        )
-        import json
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=2)
-        print(f"📋 生成索引文件：manifest.json")
 
 def validate_trajectory_data(df):
     """
@@ -404,27 +301,13 @@ if __name__ == "__main__":
         output_dir = os.path.join(OUTPUT_BASE, f"sat_trace_{RESELECT_SAT_COUNT}")
         os.makedirs(output_dir, exist_ok=True)
         print(f"📁 S3 输出目录：{output_dir}")
-        split_and_save_csv(trajectory_df, output_dir, make_manifest=True)
+        split_and_save_csv(trajectory_df, output_dir)
 
         # 同时输出到 vis 前端
         vis_dir = VIS_SAT_TRACE_DIR
         os.makedirs(vis_dir, exist_ok=True)
         print(f"📁 vis 前端输出目录：{vis_dir}")
-        split_and_save_csv(trajectory_df, vis_dir, make_manifest=False)
-
-        '''
-        # 2. 筛选卫星并生成元数据
-        sat_metadata = load_and_filter_satellites(t0, observer)
-
-        # 3. 计算卫星轨迹
-        trajectory_df = calculate_sat_trajectory(sat_metadata, ts, t0)
-
-        # 4. 数据校验
-        validate_trajectory_data(trajectory_df)
-
-        # 5. 切片保存文件
-        split_and_save_csv(trajectory_df)
-        '''
+        split_and_save_csv(trajectory_df, vis_dir)
 
         print("\n" + "="*60)
         print("🎉 卫星轨迹生成完成！")

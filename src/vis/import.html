@@ -76,6 +76,12 @@
                     <h2>无人机轨迹导入</h2>
                     <span class="badge" id="uav-count">-- 个文件</span>
                 </div>
+                <button class="btn-generate" id="btn-generate-uav" onclick="generateUavTraces()" title="使用系统自带的模块生成无人机轨迹拓扑">
+                    <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+                        <polygon points="5 3 19 12 5 21 5 3"/>
+                    </svg>
+                    <span id="gen-uav-btn-text">程序生成</span>
+                </button>
             </div>
 
             <div class="folder-row">
@@ -97,13 +103,27 @@
             </div>
         </div>
 
-        <!-- ========== 网络拓扑导入 ========== -->
+        <!-- ========== 链路拓扑生成/导入 ========== -->
         <div class="import-section" id="topo-section">
             <div class="section-header">
                 <div class="section-title">
                     <span class="icon">🔗</span>
                     <h2>链路拓扑导入</h2>
                     <span class="badge" id="topo-count">-- 个文件</span>
+                </div>
+                <div class="s3-generate-row">
+                    <select id="s3-sat-select" class="s3-select">
+                        <option value="">卫星轨迹 N</option>
+                    </select>
+                    <select id="s3-uav-select" class="s3-select">
+                        <option value="">无人机轨迹 N</option>
+                    </select>
+                    <button class="btn-generate" id="btn-generate-s3" onclick="generateS3()" title="使用 S3 模块生成链路拓扑">
+                        <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                        <span id="gen-s3-btn-text">程序生成</span>
+                    </button>
                 </div>
             </div>
 
@@ -134,6 +154,17 @@
                     <h2>网络节点导入</h2>
                     <span class="badge" id="networks-count">-- 个文件</span>
                 </div>
+                <div class="s3-generate-row">
+                    <select id="s4-sat-select" class="s3-select">
+                        <option value="">S3 output (sat_uav)</option>
+                    </select>
+                    <button class="btn-generate" id="btn-generate-s4" onclick="generateS4()" title="使用 S4 模块生成网络节点数据">
+                        <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                        <span id="gen-s4-btn-text">程序生成</span>
+                    </button>
+                </div>
             </div>
 
             <div class="folder-row">
@@ -152,6 +183,114 @@
                 <div class="dz-text">拖拽 CSV 文件到此处，或点击选择文件</div>
                 <div class="dz-hint">支持 .csv 格式，文件名格式：networks.csv</div>
                 <input type="file" id="networks-file-input" accept=".csv" multiple>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== 参数配置弹窗 ========== -->
+    <div class="modal-overlay" id="config-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>⚙️ 卫星轨迹生成配置</h2>
+                <button class="modal-close" onclick="closeConfigModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="config-grid">
+                    <div class="config-field">
+                        <label>仿真时长（秒）</label>
+                        <input type="number" id="cfg-duration" value="600" min="60" max="7200">
+                    </div>
+                    <div class="config-field">
+                        <label>观测点纬度</label>
+                        <input type="number" id="cfg-obs-lat" value="30.0" step="0.1" min="-90" max="90">
+                    </div>
+                    <div class="config-field">
+                        <label>观测点经度</label>
+                        <input type="number" id="cfg-obs-lon" value="104.0" step="0.1" min="-180" max="180">
+                    </div>
+                    <div class="config-field">
+                        <label>观测点海拔（米）</label>
+                        <input type="number" id="cfg-obs-ele" value="459" step="1">
+                    </div>
+                    <div class="config-field">
+                        <label>动态重选卫星数</label>
+                        <input type="number" id="cfg-reselect" value="40" min="5" max="200">
+                    </div>
+                    <div class="config-field">
+                        <label>最小仰角（度）</label>
+                        <input type="number" id="cfg-min-alt" value="0" step="1" min="0" max="90">
+                    </div>
+                    <div class="config-field">
+                        <label>最大距离（km）</label>
+                        <input type="number" id="cfg-max-dist" value="2000" step="100" min="100" max="10000">
+                    </div>
+                    <div class="config-field">
+                        <label>切片时长（秒）</label>
+                        <input type="number" id="cfg-chunk" value="60" min="10" max="600">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeConfigModal()">取消</button>
+                <button class="btn-confirm" id="btn-start-gen" onclick="startGenerate()">
+                    ▶ 开始生成
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== UAV 参数配置弹窗 ========== -->
+    <div class="modal-overlay" id="uav-config-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>⚙️ 无人机轨迹生成配置</h2>
+                <button class="modal-close" onclick="closeUavConfigModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="config-grid">
+                    <div class="config-field">
+                        <label>无人机数量</label>
+                        <input type="number" id="uav-cfg-count" value="50" min="1" max="200">
+                    </div>
+                    <div class="config-field">
+                        <label>仿真时长（毫秒）</label>
+                        <input type="number" id="uav-cfg-duration" value="600000" step="60000" min="60000" max="3600000">
+                    </div>
+                    <div class="config-field">
+                        <label>锚点纬度</label>
+                        <input type="number" id="uav-cfg-lat" value="30.0" step="0.1" min="-90" max="90">
+                    </div>
+                    <div class="config-field">
+                        <label>锚点经度</label>
+                        <input type="number" id="uav-cfg-lon" value="104.0" step="0.1" min="-180" max="180">
+                    </div>
+                    <div class="config-field">
+                        <label>锚点海拔（米）</label>
+                        <input type="number" id="uav-cfg-alt" value="459" step="1">
+                    </div>
+                    <div class="config-field">
+                        <label>搜索半径（米）</label>
+                        <input type="number" id="uav-cfg-radius" value="2500" step="100" min="100" max="20000">
+                    </div>
+                    <div class="config-field">
+                        <label>飞行高度（米）</label>
+                        <input type="number" id="uav-cfg-altitude" value="50" step="10" min="10" max="500">
+                    </div>
+                    <div class="config-field">
+                        <label>检测范围（米）</label>
+                        <input type="number" id="uav-cfg-detection" value="60" step="10" min="10" max="500">
+                    </div>
+                    <div class="config-field">
+                        <label>飞行速度（m/s）</label>
+                        <input type="number" id="uav-cfg-speed" value="15" step="1" min="1" max="50">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeUavConfigModal()">取消</button>
+                <button class="btn-confirm" onclick="startUavGenerate()">
+                    ▶ 开始生成
+                </button>
             </div>
         </div>
     </div>
@@ -248,33 +387,59 @@
         // ===== 程序生成卫星轨迹 =====
         let pollingTimer = null;
 
-        async function generateSatTraces() {
+        function generateSatTraces() {
+            const btn = document.getElementById('btn-generate-sat');
+            if (btn.classList.contains('running')) return;
+            // 显示参数配置弹窗
+            document.getElementById('config-modal').classList.add('show');
+        }
+
+        function closeConfigModal() {
+            document.getElementById('config-modal').classList.remove('show');
+        }
+
+        async function startGenerate() {
+            closeConfigModal();
+
+            // 读取用户配置
+            const config = {
+                duration: parseInt(document.getElementById('cfg-duration').value) || null,
+                obsLat: parseFloat(document.getElementById('cfg-obs-lat').value),
+                obsLon: parseFloat(document.getElementById('cfg-obs-lon').value),
+                obsEle: parseFloat(document.getElementById('cfg-obs-ele').value),
+                reselectCount: parseInt(document.getElementById('cfg-reselect').value) || null,
+                minAlt: parseFloat(document.getElementById('cfg-min-alt').value),
+                maxDist: parseInt(document.getElementById('cfg-max-dist').value) || null,
+                chunkDuration: parseInt(document.getElementById('cfg-chunk').value) || null
+            };
+
             const btn = document.getElementById('btn-generate-sat');
             const text = document.getElementById('gen-btn-text');
 
-            // 启动生成
-            if (!btn.classList.contains('running')) {
-                try {
-                    const res = await fetch('/api/generate-sat-traces', { method: 'POST' });
-                    const result = await res.json();
-                    if (result.ok) {
-                        btn.classList.add('running');
-                        text.textContent = '生成中…';
-                        showToast('卫星轨迹生成任务已启动，请稍候', 'success');
-                        startPolling();
-                    } else {
-                        showToast(result.message || '启动失败', 'error');
-                    }
-                } catch (e) {
-                    showToast('请求失败', 'error');
+            try {
+                const res = await fetch('/api/generate-sat-traces', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                const result = await res.json();
+                if (result.ok) {
+                    btn.classList.add('running');
+                    text.textContent = '生成中…';
+                    showToast('卫星轨迹生成任务已启动，请稍候', 'success');
+                    startPolling();
+                } else {
+                    showToast(result.message || '启动失败', 'error');
                 }
+            } catch (e) {
+                showToast('请求失败', 'error');
             }
         }
 
         function startPolling() {
             pollingTimer = setInterval(async () => {
                 try {
-                    const res = await fetch('/api/generate-status');
+                    const res = await fetch('/api/generate-sat-status');
                     const status = await res.json();
                     if (!status.running) {
                         clearInterval(pollingTimer);
@@ -297,6 +462,267 @@
                 }
             }, 2000);
         }
+
+        // ===== 程序生成无人机轨迹 =====
+        let uavPollingTimer = null;
+
+        function generateUavTraces() {
+            const btn = document.getElementById('btn-generate-uav');
+            if (btn.classList.contains('running')) return;
+            document.getElementById('uav-config-modal').classList.add('show');
+        }
+
+        function closeUavConfigModal() {
+            document.getElementById('uav-config-modal').classList.remove('show');
+        }
+
+        async function startUavGenerate() {
+            closeUavConfigModal();
+
+            const config = {
+                numUavs: parseInt(document.getElementById('uav-cfg-count').value) || null,
+                durationMs: parseInt(document.getElementById('uav-cfg-duration').value) || null,
+                anchorLat: parseFloat(document.getElementById('uav-cfg-lat').value),
+                anchorLon: parseFloat(document.getElementById('uav-cfg-lon').value),
+                anchorAlt: parseFloat(document.getElementById('uav-cfg-alt').value),
+                searchRadius: parseInt(document.getElementById('uav-cfg-radius').value) || null,
+                altitude: parseFloat(document.getElementById('uav-cfg-altitude').value),
+                detectionRange: parseInt(document.getElementById('uav-cfg-detection').value) || null,
+                uavSpeed: parseFloat(document.getElementById('uav-cfg-speed').value)
+            };
+
+            const btn = document.getElementById('btn-generate-uav');
+            const text = document.getElementById('gen-uav-btn-text');
+
+            try {
+                const res = await fetch('/api/generate-uav-traces', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                const result = await res.json();
+                if (result.ok) {
+                    btn.classList.add('running');
+                    text.textContent = '生成中…';
+                    showToast('无人机轨迹生成任务已启动，请稍候', 'success');
+                    startUavPolling();
+                } else {
+                    showToast(result.message || '启动失败', 'error');
+                }
+            } catch (e) {
+                showToast('请求失败', 'error');
+            }
+        }
+
+        function startUavPolling() {
+            uavPollingTimer = setInterval(async () => {
+                try {
+                    const res = await fetch('/api/generate-uav-status');
+                    const status = await res.json();
+                    if (!status.running) {
+                        clearInterval(uavPollingTimer);
+                        uavPollingTimer = null;
+                        const btn = document.getElementById('btn-generate-uav');
+                        const text = document.getElementById('gen-uav-btn-text');
+                        btn.classList.remove('running');
+                        if (status.error) {
+                            text.textContent = '生成失败';
+                            showToast(`生成失败: ${status.error}`, 'error');
+                        } else {
+                            text.textContent = '生成完成 ✓';
+                            showToast('无人机轨迹生成完成！文件已输出到 S3 和 vis 前端', 'success');
+                            setTimeout(() => { text.textContent = '程序生成'; }, 3000);
+                        }
+                    }
+                } catch (e) {
+                    clearInterval(uavPollingTimer);
+                    uavPollingTimer = null;
+                }
+            }, 2000);
+        }
+
+        // ===== S3 链路拓扑生成 =====
+        let s3PollingTimer = null;
+
+        // 页面加载时获取可用的 trace 选项
+        async function loadTraceOptions() {
+            try {
+                const res = await fetch('/api/list-trace-options');
+                const opts = await res.json();
+                const satSel = document.getElementById('s3-sat-select');
+                const uavSel = document.getElementById('s3-uav-select');
+                opts.sat.forEach(n => {
+                    const o = document.createElement('option');
+                    o.value = n; o.textContent = `sat_trace_${n}`;
+                    satSel.appendChild(o);
+                });
+                opts.uav.forEach(n => {
+                    const o = document.createElement('option');
+                    o.value = n; o.textContent = `uav_trace_${n}`;
+                    uavSel.appendChild(o);
+                });
+            } catch (e) {
+                console.warn('加载 trace 选项失败', e);
+            }
+        }
+        loadTraceOptions();
+
+        function generateS3() {
+            const btn = document.getElementById('btn-generate-s3');
+            if (btn.classList.contains('running')) return;
+
+            const satN = document.getElementById('s3-sat-select').value;
+            const uavN = document.getElementById('s3-uav-select').value;
+            if (!satN || !uavN) {
+                showToast('请先选择卫星和无人机轨迹数量', 'error');
+                return;
+            }
+
+            startS3Generate(satN, uavN);
+        }
+
+        async function startS3Generate(satN, uavN) {
+            const btn = document.getElementById('btn-generate-s3');
+            const text = document.getElementById('gen-s3-btn-text');
+
+            try {
+                const res = await fetch('/api/generate-s3', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ satN: parseInt(satN), uavN: parseInt(uavN) })
+                });
+                const result = await res.json();
+                if (result.ok) {
+                    btn.classList.add('running');
+                    text.textContent = '生成中…';
+                    showToast('S3 拓扑生成任务已启动，请稍候', 'success');
+                    startS3Polling();
+                } else {
+                    showToast(result.message || '启动失败', 'error');
+                }
+            } catch (e) {
+                showToast('请求失败', 'error');
+            }
+        }
+
+        function startS3Polling() {
+            s3PollingTimer = setInterval(async () => {
+                try {
+                    const res = await fetch('/api/generate-s3-status');
+                    const status = await res.json();
+                    if (!status.running) {
+                        clearInterval(s3PollingTimer);
+                        s3PollingTimer = null;
+                        const btn = document.getElementById('btn-generate-s3');
+                        const text = document.getElementById('gen-s3-btn-text');
+                        btn.classList.remove('running');
+                        if (status.error) {
+                            text.textContent = '生成失败';
+                            showToast(`生成失败: ${status.error}`, 'error');
+                        } else {
+                            text.textContent = '生成完成 ✓';
+                            showToast('链路拓扑生成完成！文件已输出到 S3 和 vis 前端', 'success');
+                            setTimeout(() => { text.textContent = '程序生成'; }, 3000);
+                        }
+                    }
+                } catch (e) {
+                    clearInterval(s3PollingTimer);
+                    s3PollingTimer = null;
+                }
+            }, 2000);
+        }
+
+        // ===== S4 网络节点生成 =====
+        let s4PollingTimer = null;
+
+        async function loadS4Options() {
+            try {
+                const res = await fetch('/api/list-s4-options');
+                const opts = await res.json();
+                const sel = document.getElementById('s4-sat-select');
+                opts.forEach(o => {
+                    const opt = document.createElement('option');
+                    opt.value = `${o.satN}_${o.uavN}`;
+                    opt.textContent = `sat_${o.satN} + uav_${o.uavN}`;
+                    sel.appendChild(opt);
+                });
+            } catch (e) {
+                console.warn('加载 S4 选项失败', e);
+            }
+        }
+        loadS4Options();
+
+        function generateS4() {
+            const btn = document.getElementById('btn-generate-s4');
+            if (btn.classList.contains('running')) return;
+
+            const val = document.getElementById('s4-sat-select').value;
+            if (!val) {
+                showToast('请先选择 S3 输出组合', 'error');
+                return;
+            }
+            const [satN, uavN] = val.split('_');
+            startS4Generate(parseInt(satN), parseInt(uavN));
+        }
+
+        async function startS4Generate(satN, uavN) {
+            const btn = document.getElementById('btn-generate-s4');
+            const text = document.getElementById('gen-s4-btn-text');
+
+            try {
+                const res = await fetch('/api/generate-s4', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ satN, uavN, mode: 'b' })
+                });
+                const result = await res.json();
+                if (result.ok) {
+                    btn.classList.add('running');
+                    text.textContent = '生成中…';
+                    showToast('S4 网络节点生成任务已启动，请稍候', 'success');
+                    startS4Polling();
+                } else {
+                    showToast(result.message || '启动失败', 'error');
+                }
+            } catch (e) {
+                showToast('请求失败', 'error');
+            }
+        }
+
+        function startS4Polling() {
+            s4PollingTimer = setInterval(async () => {
+                try {
+                    const res = await fetch('/api/generate-s4-status');
+                    const status = await res.json();
+                    if (!status.running) {
+                        clearInterval(s4PollingTimer);
+                        s4PollingTimer = null;
+                        const btn = document.getElementById('btn-generate-s4');
+                        const text = document.getElementById('gen-s4-btn-text');
+                        btn.classList.remove('running');
+                        if (status.error) {
+                            text.textContent = '生成失败';
+                            showToast(`生成失败: ${status.error}`, 'error');
+                        } else {
+                            text.textContent = '生成完成 ✓';
+                            showToast('网络节点生成完成！文件已输出到 S4 和 vis 前端', 'success');
+                            setTimeout(() => { text.textContent = '程序生成'; }, 3000);
+                        }
+                    }
+                } catch (e) {
+                    clearInterval(s4PollingTimer);
+                    s4PollingTimer = null;
+                }
+            }, 2000);
+        }
+
+        // 点击弹窗遮罩关闭
+        document.getElementById('config-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeConfigModal();
+        });
+        document.getElementById('uav-config-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeUavConfigModal();
+        });
 
         setupDropZone('sat-drop', 'sat-file-input', 'sat');
         setupDropZone('uav-drop', 'uav-file-input', 'uav');

@@ -7,6 +7,7 @@ import csv
 import time
 import json
 import datetime
+import shutil
 import pandas as pd
 
 from generate import generate_sar_traffic
@@ -15,6 +16,14 @@ from generate import generate_sar_traffic
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 S3_OUTPUTS_BASE = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "S3", "outputs"))
 S3_TRACES_BASE = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "S3", "traces"))
+VIS_NETWORKS_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "vis", "public", "data", "networks"))
+
+# 从环境变量加载用户配置（前端传入，跳过交互选择）
+_S4_CONFIG_FILE = os.environ.get('S4_CONFIG_FILE', '')
+_S4_CONFIG = None
+if _S4_CONFIG_FILE and os.path.exists(_S4_CONFIG_FILE):
+    with open(_S4_CONFIG_FILE, 'r', encoding='utf-8') as _f:
+        _S4_CONFIG = json.load(_f)
 
 
 def scan_output_dirs():
@@ -150,34 +159,47 @@ def run():
 
     # ── 1. 选择 S3 output 目录 ──
     output_dirs = scan_output_dirs()
-    if not output_dirs:
-        LogColor.error("S3/outputs/ 下没有任何 output_m_n 目录，请先执行 S3")
-        return
 
-    print("\n可用的 S3 output_m_n 目录:")
-    selected_output, (sat_n, uav_n) = select_from_dict(
-        "请输入要使用的 m_n (例如 40_50): ", output_dirs
-    )
-
-    # ── 2. 选择模式 ──
-    print("\n请选择模式:")
-    print("  a - mode_a (mininet)")
-    print("  b - mode_b (networkx)")
-    while True:
-        try:
-            mode_choice = input("请输入 a 或 b: ").strip().lower()
-            if mode_choice in ("a", "b"):
-                break
-            print("  请输入 a 或 b")
-        except (EOFError, KeyboardInterrupt):
-            print("\n[Exit]")
+    # 优先使用 env 配置（前端传入），其次互动选择
+    if _S4_CONFIG and 'sat_n' in _S4_CONFIG and 'uav_n' in _S4_CONFIG:
+        sat_n = int(_S4_CONFIG['sat_n'])
+        uav_n = int(_S4_CONFIG['uav_n'])
+        mode_choice = _S4_CONFIG.get('mode', 'b')
+        key = (sat_n, uav_n)
+        if key in output_dirs:
+            selected_output = output_dirs[key][0]
+        else:
+            LogColor.error(f"S3/outputs/ 下没有 output_{sat_n}_{uav_n} 目录，请先执行 S3")
             return
+    else:
+        if not output_dirs:
+            LogColor.error("S3/outputs/ 下没有任何 output_m_n 目录，请先执行 S3")
+            return
+
+        print("\n可用的 S3 output_m_n 目录:")
+        selected_output, (sat_n, uav_n) = select_from_dict(
+            "请输入要使用的 m_n (例如 40_50): ", output_dirs
+        )
+
+        # ── 2. 选择模式 ──
+        print("\n请选择模式:")
+        print("  a - mode_a (mininet)")
+        print("  b - mode_b (networkx)")
+        while True:
+            try:
+                mode_choice = input("请输入 a 或 b: ").strip().lower()
+                if mode_choice in ("a", "b"):
+                    break
+                print("  请输入 a 或 b")
+            except (EOFError, KeyboardInterrupt):
+                print("\n[Exit]")
+                return
 
     cf.MODE = "soft" if mode_choice == "b" else "hard"
     cf.csv_dir = os.path.join(selected_output, "links")
     cf.rules_dir = os.path.join(selected_output, "rules")
-    cf.sat_dir = os.path.join(S3_TRACES_BASE, "sat_trace", f"sat_trace_{sat_n}")
-    cf.uav_dir = os.path.join(S3_TRACES_BASE, "uav_trace", f"uav_trace_{uav_n}")
+    cf.sat_dir = os.path.join(S3_TRACES_BASE, f"sat_trace_{sat_n}")
+    cf.uav_dir = os.path.join(S3_TRACES_BASE, f"uav_trace_{uav_n}")
 
     print(f"\n[links]  {cf.csv_dir}")
     print(f"[rules]  {cf.rules_dir}")
@@ -264,6 +286,12 @@ def run():
         finally:
             engine.FlushLog(output_csv)
             engine.StopNet()
+
+    # 同时输出到 vis 前端
+    os.makedirs(VIS_NETWORKS_DIR, exist_ok=True)
+    vis_csv = os.path.join(VIS_NETWORKS_DIR, f"networks_{time_str}.csv")
+    shutil.copy2(output_csv, vis_csv)
+    print(f"📁 vis 前端输出: {vis_csv}")
 
 if __name__ == '__main__':
     run()
