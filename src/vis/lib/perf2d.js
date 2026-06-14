@@ -33,115 +33,58 @@ function msToTimeString(ms) {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
-// 加载真实性能数据
+// 加载真实性能数据（通过 API 获取 networks 目录中最新的 CSV）
 async function loadRealPerformanceData() {
-	// 尝试多个可能的路径（包括绝对路径和相对路径）
-	const baseUrl = window.location.origin;
-	const possiblePaths = [
-			'/data/networks/networks.csv',
-		'/data/networks.csv',
-		'./data/networks.csv',
-		'public/data/networks.csv',
-		'/src/vis/public/data/networks.csv',
-		'../public/data/networks.csv',
-		'./public/data/networks.csv',
-		'data/networks.csv',
-		`${baseUrl}/data/networks.csv`
-	];
-    
-    let lastError = null;
-    
-    for (const path of possiblePaths) {
-        try {
-            console.log(`Trying to load real performance data from: ${path}`);
-            const response = await fetch(path);
-            if (!response.ok) {
-                console.warn(`HTTP error! status: ${response.status}, url: ${path}`);
-                continue; // 尝试下一个路径
-            }
-            const text = await response.text();
-            console.log(`CSV file loaded from ${path}, size:`, text.length, 'chars');
-            
-            const parsed = Papa.parse(text, {
-                header: true,
-                dynamicTyping: true,
-                skipEmptyLines: true
-            });
-            console.log('CSV parsed rows:', parsed.data.length, 'errors:', parsed.errors.length);
-            if (parsed.errors && parsed.errors.length > 0) {
-                console.warn('CSV parse errors:', parsed.errors);
-            }
-            
-            const headers = parsed.meta.fields || [];
-            console.log('CSV headers:', headers);
-            const requiredFields = ['time_ms', 'latency_ms', 'throughput_mbps'];
-            if (!requiredFields.every(field => headers.includes(field))) {
-                console.warn('Required columns not found in CSV. Available columns:', headers);
-                continue; // 尝试下一个路径
-            }
-            
-            // 解析数据点
-            const data = [];
-            let minTime = Infinity;
-            let maxTime = -Infinity;
-            let skipped = 0;
-            
-            for (const row of parsed.data) {
-                const timeMs = parseInt(row.time_ms, 10);
-                const latency = parseFloat(row.latency_ms);
-                const throughput = parseFloat(row.throughput_mbps);
-                
-                if (isNaN(timeMs) || isNaN(latency) || isNaN(throughput)) {
-                    skipped++;
-                    continue; // 跳过无效数据
-                }
-                
-                minTime = Math.min(minTime, timeMs);
-                maxTime = Math.max(maxTime, timeMs);
-                
-                data.push({
-                    timeMs,
-                    latency,
-                    throughput
-                });
-            }
-            
-            console.log(`Parsed ${data.length} data points, skipped ${skipped} rows`);
-            
-            if (data.length === 0) {
-                console.warn('No valid data points found in CSV');
-                continue; // 尝试下一个路径
-            }
-            
-            // 保留原始时间戳，按时间排序
-            realPerformanceData = data.sort((a, b) => a.timeMs - b.timeMs);
-            
-            console.log('Loaded real performance data:', realPerformanceData.length, 'points');
-            console.log('Time range:', msToTimeString(realPerformanceData[0].timeMs), 'to', msToTimeString(realPerformanceData[realPerformanceData.length - 1].timeMs));
-            console.log('First few points:', realPerformanceData.slice(0, 3));
-            
-            console.log(`Successfully loaded data from: ${path}`);
-            return true;
-        } catch (error) {
-            console.warn(`Failed to load from ${path}:`, error.message);
-            lastError = error;
-            continue; // 尝试下一个路径
+    try {
+        console.log('Loading performance data via /api/networks-latest...');
+        const response = await fetch('/api/networks-latest');
+        if (!response.ok) {
+            throw new Error(`API returned status ${response.status}`);
         }
+        const text = await response.text();
+        console.log('CSV loaded, size:', text.length, 'chars');
+
+        const parsed = Papa.parse(text, {
+            header: true,
+            dynamicTyping: true,
+            skipEmptyLines: true
+        });
+        console.log('CSV parsed rows:', parsed.data.length);
+
+        const headers = parsed.meta.fields || [];
+        const requiredFields = ['time_ms', 'latency_ms', 'throughput_mbps'];
+        if (!requiredFields.every(field => headers.includes(field))) {
+            throw new Error(`Missing required columns. Available: ${headers.join(', ')}`);
+        }
+
+        const data = [];
+        for (const row of parsed.data) {
+            const timeMs = parseInt(row.time_ms, 10);
+            const latency = parseFloat(row.latency_ms);
+            const throughput = parseFloat(row.throughput_mbps);
+            if (isNaN(timeMs) || isNaN(latency) || isNaN(throughput)) continue;
+            data.push({ timeMs, latency, throughput });
+        }
+
+        if (data.length === 0) throw new Error('No valid data points in CSV');
+
+        realPerformanceData = data.sort((a, b) => a.timeMs - b.timeMs);
+        console.log('Loaded', realPerformanceData.length, 'points, range:',
+            msToTimeString(realPerformanceData[0].timeMs), 'to',
+            msToTimeString(realPerformanceData[realPerformanceData.length - 1].timeMs));
+        return true;
+    } catch (error) {
+        console.error('Failed to load performance data:', error.message);
+        console.warn('Using fallback test data');
+        realPerformanceData = [
+            { timeMs: 0, latency: 5.0, throughput: 20.0 },
+            { timeMs: 1000, latency: 5.5, throughput: 19.5 },
+            { timeMs: 2000, latency: 6.0, throughput: 19.0 },
+            { timeMs: 3000, latency: 5.8, throughput: 20.2 },
+            { timeMs: 4000, latency: 5.2, throughput: 20.5 }
+        ];
+        return true;
     }
-    
-	    // 所有路径都失败
-	    console.error('All paths failed to load performance data:', possiblePaths);
-	    console.error('Last error:', lastError);
-	    // 使用测试数据作为后备，避免图表完全无法显示
-	    console.warn('Using fallback test data for performance chart');
-	    realPerformanceData = [
-	        { time: '00:00:00', latency: 5.0, throughput: 20.0 },
-	        { time: '00:00:01', latency: 5.5, throughput: 19.5 },
-	        { time: '00:00:02', latency: 6.0, throughput: 19.0 },
-	        { time: '00:00:03', latency: 5.8, throughput: 20.2 },
-	        { time: '00:00:04', latency: 5.2, throughput: 20.5 }
-	    ];
-	    return true;
 }
 
 function initSimulationTime(viewer) {
@@ -149,7 +92,7 @@ function initSimulationTime(viewer) {
     if (viewer) {
         currentViewer = viewer;
     }
-    
+
     if (!currentViewer) {
         console.warn("没有提供viewer，使用系统当前时间");
         // 获取当前系统时间
@@ -158,22 +101,22 @@ function initSimulationTime(viewer) {
         simulationCurrentTime = new Date(now);
         return;
     }
-    
+
     try {
         // 获取当前模拟时间（从viewer.clock.currentTime）
         const currentTime = currentViewer.clock.currentTime;
-        
+
         // 计算从shared.startUtc到当前时间经过的秒数
         const secondsSinceStart = Cesium.JulianDate.secondsDifference(currentTime, shared.startUtc);
-        
+
         // 设置模拟开始时间为08:00:00加上已过去的时间
         simulationStartTime = new Date();
         simulationStartTime.setHours(8, 0, 0, 0); // UTC+8 08:00:00
         simulationStartTime.setTime(simulationStartTime.getTime() + secondsSinceStart * 1000);
-        
+
         // 设置模拟当前时间
         simulationCurrentTime = new Date(simulationStartTime);
-        
+
         console.log("性能图表模拟时间初始化（基于当前模拟时间）:", {
             startTime: simulationStartTime.toLocaleTimeString(),
             currentTime: simulationCurrentTime.toLocaleTimeString(),
@@ -250,7 +193,7 @@ function generatePerformanceDataPoint() {
 // 更新性能数据缓冲区
 function updatePerformanceDataBuffer() {
     const newDataPoint = generatePerformanceDataPoint();
-    
+
     // 如果没有有效数据点，返回当前缓冲区数据
     if (!newDataPoint) {
         return {
@@ -258,19 +201,19 @@ function updatePerformanceDataBuffer() {
             throughput: performanceDataBuffer.throughput
         };
     }
-    
+
     // 添加新数据点
     performanceDataBuffer.timestamps.push(newDataPoint.time);
     performanceDataBuffer.latency.push([newDataPoint.time, newDataPoint.latency]);
     performanceDataBuffer.throughput.push([newDataPoint.time, newDataPoint.throughput]);
-    
+
     // 保持缓冲区大小不超过MAX_DATA_POINTS
     if (performanceDataBuffer.timestamps.length > MAX_DATA_POINTS) {
         performanceDataBuffer.timestamps.shift();
         performanceDataBuffer.latency.shift();
         performanceDataBuffer.throughput.shift();
     }
-    
+
     return {
         latency: performanceDataBuffer.latency,
         throughput: performanceDataBuffer.throughput
@@ -286,15 +229,15 @@ function generatePerformanceData() {
 export function updatePerformanceChart() {
     const container = document.getElementById('perf-chart-container');
     if (!shared.state.showPerformance || !container) {
-        if (shared.perfChart) { 
-            shared.perfChart.clear(); 
+        if (shared.perfChart) {
+            shared.perfChart.clear();
         }
         return;
     }
 
     if (!shared.perfChart) {
         shared.perfChart = echarts.init(container, 'dark');
-        
+
         // 初始图表配置
         shared.perfChart.setOption({
             backgroundColor: 'transparent',
@@ -444,20 +387,20 @@ export function updatePerformanceChart() {
         });
         return;
     }
-    
+
     console.log('Performance data loaded, data points:', realPerformanceData.length);
 
     // 更新数据
     const perfData = generatePerformanceData();
     const timeLabels = perfData.latency.map(item => item[0]);
-    
+
     // 清除可能存在的标题
     shared.perfChart.setOption({
         title: {
             show: false
         }
     });
-    
+
     shared.perfChart.setOption({
         xAxis: {
             data: timeLabels
@@ -476,20 +419,20 @@ export async function startPerformanceUpdates(viewer) {
     if (perfUpdateInterval) {
         clearInterval(perfUpdateInterval);
     }
-    
+
     // 初始化模拟时间（基于当前模拟时间）
     initSimulationTime(viewer);
-    
+
     // 初始化数据缓冲区（清空）
     performanceDataBuffer = {
         latency: [],
         throughput: [],
         timestamps: []
     };
-    
+
     // 重置真实数据索引
     lastAppendedIndex = 0;
-    
+
     // 加载真实性能数据（等待加载完成）
     try {
         console.log('Loading real performance data before starting updates...');
@@ -500,14 +443,14 @@ export async function startPerformanceUpdates(viewer) {
         console.error('Performance chart updates disabled due to missing real data');
         return; // 不开始定期更新
     }
-    
+
     // 不预填充数据点，图表将从当前模拟时间开始实时添加数据
-    
+
     // 立即更新一次图表（初始为空）
     if (shared.state.showPerformance) {
         updatePerformanceChart();
     }
-    
+
     // 开始定期更新
     perfUpdateInterval = setInterval(() => {
         if (shared.state.showPerformance) {

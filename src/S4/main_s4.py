@@ -161,10 +161,12 @@ def run():
     output_dirs = scan_output_dirs()
 
     # 优先使用 env 配置（前端传入），其次互动选择
+    max_steps = None
     if _S4_CONFIG and 'sat_n' in _S4_CONFIG and 'uav_n' in _S4_CONFIG:
         sat_n = int(_S4_CONFIG['sat_n'])
         uav_n = int(_S4_CONFIG['uav_n'])
         mode_choice = _S4_CONFIG.get('mode', 'b')
+        max_steps = _S4_CONFIG.get('max_steps', None)
         key = (sat_n, uav_n)
         if key in output_dirs:
             selected_output = output_dirs[key][0]
@@ -265,7 +267,10 @@ def run():
 
         try:
             # 主模拟循环：按时间推进，依次处理链路、规则和请求
-            while tmp_timer < 600000:
+            total_duration = min(600000, max_steps * 100) if max_steps else 600000
+            while tmp_timer < total_duration:
+                if tmp_timer % 60000 == 0:
+                    print(f"  [S4] 模拟进度: {tmp_timer // 1000}s / {total_duration // 1000}s")
                 while edge_ind < len(links) and int(links.iloc[edge_ind]['time_ms']) <= timer:
                     engine.addLink(links.iloc[edge_ind])
                     edge_ind += 1

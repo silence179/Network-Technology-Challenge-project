@@ -3,7 +3,7 @@ import cesium from 'vite-plugin-cesium';
 import { resolve, join } from 'path';
 import { exec, spawn } from 'child_process';
 import { writeFile, mkdir, readdir, unlink } from 'fs/promises';
-import { existsSync, readdirSync, statSync } from 'fs';
+import { existsSync, readdirSync, statSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 
 const DATA_DIR = resolve(__dirname, 'public/data');
@@ -501,6 +501,7 @@ function trajectoryApiPlugin() {
         }
 
         const configPayload = { sat_n: config.satN, uav_n: config.uavN, mode: config.mode || 'b' };
+        if (config.maxSteps) configPayload.max_steps = config.maxSteps;
         await writeFile(S4_CONFIG_FILE, JSON.stringify(configPayload, null, 2), 'utf-8');
 
         const pyCmd = process.platform === 'win32' ? 'python' : 'python3';
@@ -547,6 +548,27 @@ function trajectoryApiPlugin() {
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify(s4GenStatus));
+      });
+
+      // GET /api/networks-latest — 返回 networks 目录中最新 CSV 的内容
+      server.middlewares.use('/api/networks-latest', async (req, res) => {
+        if (req.method !== 'GET') { res.statusCode = 405; res.end(); return; }
+        try {
+          if (!existsSync(NETWORKS_DIR)) {
+            res.statusCode = 404; res.end('networks dir not found'); return;
+          }
+          const files = (await readdir(NETWORKS_DIR)).filter(f => f.endsWith('.csv')).sort();
+          if (files.length === 0) {
+            res.statusCode = 404; res.end('no csv in networks dir'); return;
+          }
+          const latest = files[files.length - 1];
+          const content = readFileSync(join(NETWORKS_DIR, latest), 'utf-8');
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+          res.end(content);
+        } catch (e) {
+          res.statusCode = 500; res.end(JSON.stringify({ error: e.message }));
+        }
       });
     }
   };
