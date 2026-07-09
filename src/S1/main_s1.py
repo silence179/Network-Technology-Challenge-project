@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 import requests
 import os
 import json
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing as mp
 
 # ======================== 全局配置（需与S2协商确认）========================
 # 1. 时间配置（T0时刻：仿真起始时间，与S2保持一致）
@@ -50,6 +52,23 @@ CHUNK_DURATION_SEC = 60  # 每个文件的时间切片（60秒）
 # 5. 动态筛选配置
 DYNAMIC_FILTER_INTERVAL_SEC = 60  # 动态筛选时间窗口（每60秒重新筛选一次）
 RESELECT_SAT_COUNT = 40  # 每次动态筛选保留的卫星数（可被环境变量覆盖）
+
+# 6. 性能优化配置
+COARSE_FILTER_DIST_KM = 4000.0   # 粗筛选 3D 距离阈值（km），实际阈值 2000km，保守 2x
+MP_BATCH_SIZE = 200              # 多进程每批卫星数
+MP_MIN_SATS_FOR_PARALLEL = 1500  # 候选数少于此值不启用多进程，避免进程创建开销
+
+# 地球自转速率（弧度/分钟，恒星日）
+_EARTH_ROT_RAD_PER_MIN = 2.0 * np.pi / (23.0 * 60.0 + 56.0 + 4.0905 / 60.0)
+# WGS84 椭球参数（粗筛选用）
+_WGS84_A = 6378.137  # 长半轴 km
+_WGS84_F = 1.0 / 298.257223563
+_WGS84_E2 = 2.0 * _WGS84_F - _WGS84_F ** 2
+# T0 的儒略日（粗筛选用）
+_J2000 = datetime(2000, 1, 1, 12, 0, 0)
+_JD_T0 = 2451545.0 + (T0_UTC - _J2000).total_seconds() / 86400.0
+_GMST0_DEG = (280.46061837 + 360.98564736629 * (_JD_T0 - 2451545.0)) % 360
+_GMST0_RAD = np.deg2rad(_GMST0_DEG)
 
 # 从环境变量加载用户配置（前端传入，覆盖以上默认值）
 _S1_CONFIG_FILE = os.environ.get('S1_CONFIG_FILE', '')
@@ -147,14 +166,323 @@ def filter_visible_satellites(all_starlink_sats, observer, current_t):
         })
     return sat_metadata
 
+
+# ======================== 性能优化：粗粒度预筛选 + 多进程 ========================
+
+# ---- TLE 行缓存（用于多进程传递卫星信息，避免 pickle EarthSatellite） ----
+_tle_line_cache = {}  # norad_id -> (name, line1, line2)
+
+
+def _build_tle_line_cache(tle_file_path):
+    """解析 TLE 文件，构建 NORAD ID → TLE 行映射（一次解析，多次复用）"""
+    global _tle_line_cache
+    with open(tle_file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    _tle_line_cache.clear()
+    for i in range(0, len(lines) - 2, 3):
+        name = lines[i].strip()
+        line1 = lines[i + 1].strip()
+        line2 = lines[i + 2].strip()
+        # TLE line1 格式：列 3-7（1-indexed）为 NORAD ID
+        try:
+            norad_id = int(line1[2:7])
+            _tle_line_cache[norad_id] = (name, line1, line2)
+        except (ValueError, IndexError):
+            continue
+    print(f"📋 TLE 行缓存已构建：{len(_tle_line_cache)} 颗卫星")
+
+
+# ---- 轨道数据缓存（用于粗筛选，避免重复提取轨道要素） ----
+_orbit_data_cache = None
+
+
+def _build_orbit_data(satellites):
+    """
+    从 Skyfield 卫星列表提取轨道要素到 NumPy 数组。
+    只构建一次，后续每次粗筛选直接复用。
+    """
+    n = len(satellites)
+    incl = np.empty(n, dtype=np.float64)
+    node = np.empty(n, dtype=np.float64)
+    argp = np.empty(n, dtype=np.float64)
+    M0 = np.empty(n, dtype=np.float64)
+    n_motion = np.empty(n, dtype=np.float64)  # mean motion, rad/min
+    epoch_min = np.empty(n, dtype=np.float64)  # epoch offset from T0, minutes
+    norad_ids = np.empty(n, dtype=np.int64)
+    sat_objs = np.empty(n, dtype=object)
+
+    for i, sat in enumerate(satellites):
+        m = sat.model
+        incl[i] = np.deg2rad(m.inclo)
+        node[i] = np.deg2rad(m.nodeo)
+        argp[i] = np.deg2rad(m.argpo)
+        M0[i] = np.deg2rad(m.mo)
+        n_motion[i] = m.no_kozai  # rad/min
+
+        # 解析 TLE epoch
+        yr = m.epochyr
+        if yr < 57:
+            yr += 2000
+        else:
+            yr += 1900
+        doy = int(m.epochdays)
+        frac_day = m.epochdays - doy
+        epoch_dt = datetime(yr, 1, 1) + timedelta(
+            days=doy - 1, seconds=frac_day * 86400
+        )
+        epoch_min[i] = (epoch_dt - T0_UTC).total_seconds() / 60.0
+
+        norad_ids[i] = m.satnum
+        sat_objs[i] = sat
+
+    # 观测点 ECEF 坐标（在此时计算以反映可能的配置覆盖）
+    obs_lat_rad = np.deg2rad(OBS_LAT)
+    obs_lon_rad = np.deg2rad(OBS_LON)
+    n_sin = np.sqrt(1.0 - _WGS84_E2 * np.sin(obs_lat_rad) ** 2)
+    n_val = _WGS84_A / n_sin
+    obs_ecef_x = (n_val + OBS_ELE / 1000.0) * np.cos(obs_lat_rad) * np.cos(obs_lon_rad)
+    obs_ecef_y = (n_val + OBS_ELE / 1000.0) * np.cos(obs_lat_rad) * np.sin(obs_lon_rad)
+    obs_ecef_z = (n_val * (1.0 - _WGS84_E2) + OBS_ELE / 1000.0) * np.sin(obs_lat_rad)
+
+    return {
+        'incl': incl, 'node': node, 'argp': argp,
+        'M0': M0, 'n_motion': n_motion, 'epoch_min': epoch_min,
+        'norad_ids': norad_ids, 'sat_objs': sat_objs,
+        'obs_ecef_x': obs_ecef_x, 'obs_ecef_y': obs_ecef_y, 'obs_ecef_z': obs_ecef_z,
+    }
+
+
+def _coarse_filter_candidates(orbit_data, elapsed_minutes):
+    """
+    矢量化粗粒度卫星可见性筛选（单次调用 ~10ms，覆盖上万颗卫星）。
+
+    使用简化的圆轨道传播器 + 3D ECEF 坐标变换，
+    快速估算每颗卫星到观测点的直线距离。
+    保守设计：宁可保留不可见卫星（后续精确筛选排除），绝不漏选。
+
+    返回：候选卫星在原始列表中的索引数组。
+    """
+    incl = orbit_data['incl']
+    node = orbit_data['node']
+    argp = orbit_data['argp']
+    M0 = orbit_data['M0']
+    n_motion = orbit_data['n_motion']
+    epoch_min = orbit_data['epoch_min']
+
+    # ── 简化轨道传播（圆轨道近似，e≈0） ──
+    # 当前平近点角: M = M0 + n * (t - t_epoch)
+    M = M0 + n_motion * (elapsed_minutes - epoch_min)
+    # 纬度幅角（近圆轨道：真近点角 ≈ 平近点角）
+    u = argp + M
+
+    # 卫星轨道半径（近似常数：地球半径 + 550km Starlink 典型高度）
+    R_sat = 6371.0 + 550.0  # km
+
+    # ── ECI 坐标（地心惯性系） ──
+    cos_u = np.cos(u)
+    sin_u = np.sin(u)
+    cos_incl = np.cos(incl)
+    sin_incl = np.sin(incl)
+    cos_node = np.cos(node)
+    sin_node = np.sin(node)
+
+    # 轨道面 → ECI 旋转
+    x_eci = R_sat * (cos_u * cos_node - sin_u * cos_incl * sin_node)
+    y_eci = R_sat * (cos_u * sin_node + sin_u * cos_incl * cos_node)
+    z_eci = R_sat * sin_u * sin_incl
+
+    # ── ECI → ECEF（绕 Z 轴旋转 -GMST） ──
+    # GMST(t) = GMST0 + ω_earth * elapsed_minutes
+    gmst = _GMST0_RAD + _EARTH_ROT_RAD_PER_MIN * elapsed_minutes
+    cos_gmst = np.cos(gmst)
+    sin_gmst = np.sin(gmst)
+
+    x_ecef = x_eci * cos_gmst + y_eci * sin_gmst
+    y_ecef = -x_eci * sin_gmst + y_eci * cos_gmst
+    z_ecef = z_eci
+
+    # ── 到观测点的 3D 直线距离（保守阈值 4000km >> 可见最大 ~2704km） ──
+    dx = x_ecef - orbit_data['obs_ecef_x']
+    dy = y_ecef - orbit_data['obs_ecef_y']
+    dz = z_ecef - orbit_data['obs_ecef_z']
+    dist_km = np.sqrt(dx * dx + dy * dy + dz * dz)
+
+    candidate_mask = dist_km < COARSE_FILTER_DIST_KM
+    return np.where(candidate_mask)[0]
+
+
+# ---- 多进程精确筛选 ----
+
+# Worker 进程全局变量（通过 initializer 设置，每个子进程独立）
+_worker_sats = None
+_worker_ts = None
+
+
+def _mp_worker_init(candidate_tle_list):
+    """
+    多进程 worker 初始化：预加载本进程需要检查的候选卫星。
+    每个子进程只调用一次，后续 _mp_check_batch 复用。
+    """
+    global _worker_sats, _worker_ts
+    _worker_ts = load.timescale()
+    _worker_sats = {}
+    for norad_id, name, line1, line2 in candidate_tle_list:
+        try:
+            _worker_sats[norad_id] = EarthSatellite(line1, line2, name, _worker_ts)
+        except Exception:
+            pass  # 个别卫星 TLE 解析失败则跳过
+
+
+def _mp_check_batch(args):
+    """
+    多进程 batch 检查：检查一批卫星在当前时刻的可见性。
+    在 worker 进程中调用，通过全局变量访问预构建的卫星对象。
+    """
+    global _worker_sats, _worker_ts
+
+    norad_ids, t_jd, obs_lat, obs_lon, obs_ele, min_alt, max_dist = args
+
+    t = _worker_ts.tt(jd=t_jd)
+    observer = Topos(
+        latitude_degrees=obs_lat,
+        longitude_degrees=obs_lon,
+        elevation_m=obs_ele,
+    )
+
+    results = []
+    for nid in norad_ids:
+        sat = _worker_sats.get(nid)
+        if sat is None:
+            continue
+        try:
+            diff = sat - observer
+            topo = diff.at(t)
+            alt = topo.altaz()[0].degrees
+            dist = topo.distance().km
+            if alt > min_alt or dist < max_dist:
+                results.append((dist, nid))
+        except Exception:
+            pass  # 个别卫星计算失败则跳过
+
+    return results
+
+
+def filter_visible_satellites_optimized(all_starlink_sats, observer, current_t,
+                                         orbit_data, elapsed_minutes):
+    """
+    优化版卫星筛选：粗粒度预筛选 →（候选多时）多进程精确检查。
+    与 filter_visible_satellites 保持相同的输入输出接口。
+    """
+    # ── Step 1: 粗粒度预筛选（矢量化 NumPy，数毫秒完成） ──
+    candidate_indices = _coarse_filter_candidates(
+        orbit_data, elapsed_minutes,
+    )
+
+    n_candidates = len(candidate_indices)
+
+    # 安全回退：粗筛选结果太少则使用全量卫星（避免边缘情况漏选）
+    if n_candidates < RESELECT_SAT_COUNT:
+        print(f"  ⚠️ 粗筛选仅得 {n_candidates} 颗（<{RESELECT_SAT_COUNT}），回退到全量筛选")
+        candidate_indices = np.arange(len(all_starlink_sats))
+
+    # 构建候选卫星列表（主进程的 EarthSatellite 对象）
+    candidates = [all_starlink_sats[i] for i in candidate_indices]
+    n_candidates = len(candidates)
+
+    # ── Step 2: 精确可见性检查 ──
+    t_jd = current_t.tt
+
+    if n_candidates >= MP_MIN_SATS_FOR_PARALLEL:
+        # ── 多进程并行路径 ──
+        n_workers = max(1, mp.cpu_count() - 1)
+
+        # 从 TLE 缓存中提取候选卫星的 TLE 行（避免 pickle EarthSatellite）
+        candidate_tle_list = []
+        for idx in candidate_indices:
+            sat = all_starlink_sats[idx]
+            nid = sat.model.satnum
+            tle_info = _tle_line_cache.get(nid)
+            if tle_info:
+                candidate_tle_list.append(
+                    (nid, tle_info[0], tle_info[1], tle_info[2])
+                )
+
+        # 将候选卫星分批
+        batches = []
+        for i in range(0, len(candidate_indices), MP_BATCH_SIZE):
+            batch_ids = [
+                int(all_starlink_sats[idx].model.satnum)
+                for idx in candidate_indices[i:i + MP_BATCH_SIZE]
+            ]
+            batches.append((
+                batch_ids, t_jd,
+                OBS_LAT, OBS_LON, OBS_ELE,
+                MIN_ALT_DEG, MAX_DIST_KM,
+            ))
+
+        # 并行执行
+        all_visible = []
+        with ProcessPoolExecutor(
+            max_workers=n_workers,
+            initializer=_mp_worker_init,
+            initargs=(candidate_tle_list,),
+        ) as executor:
+            for result in executor.map(_mp_check_batch, batches):
+                all_visible.extend(result)
+
+        print(f"  ✅ 并行筛选完成：{n_candidates} 颗候选 → {len(all_visible)} 颗可见 "
+              f"（{n_workers} workers, {len(batches)} batches）")
+    else:
+        # ── 串行路径（候选少时避免多进程创建开销） ──
+        all_visible = []
+        for sat in candidates:
+            try:
+                diff = sat - observer
+                topo = diff.at(current_t)
+                alt = topo.altaz()[0].degrees
+                dist = topo.distance().km
+                if alt > MIN_ALT_DEG or dist < MAX_DIST_KM:
+                    all_visible.append((dist, sat.model.satnum))
+            except Exception:
+                pass
+
+    # ── Step 3: 排序取前 N 颗 ──
+    all_visible.sort(key=lambda x: x[0])
+    selected = all_visible[:RESELECT_SAT_COUNT]
+
+    # ── Step 4: 构建元数据（使用主进程的卫星对象，确保与原逻辑一致） ──
+    sat_lookup = {sat.model.satnum: sat for sat in all_starlink_sats}
+    sat_metadata = []
+    for idx, (dist_km, norad_id) in enumerate(selected, 1):
+        sat = sat_lookup.get(norad_id)
+        if sat is None:
+            continue
+        sat_id = f"SAT_{norad_id:05d}"
+        ip = f"{IP_PREFIX}{norad_id % 255}"
+        sat_metadata.append({
+            "node_id": sat_id,
+            "name": sat.name.strip(),
+            "ip": ip,
+            "orbit_id": -1,
+            "satellite_obj": sat,
+            "norad_id": norad_id,
+            "current_dist_km": round(dist_km, 2),
+        })
+    return sat_metadata
+
+
 def calculate_dynamic_sat_trajectory(all_starlink_sats, ts, t0, observer):
     """
-    动态计算卫星轨迹：每DYNAMIC_FILTER_INTERVAL_SEC秒重新筛选可见卫星
+    动态计算卫星轨迹：每DYNAMIC_FILTER_INTERVAL_SEC秒重新筛选可见卫星。
+    使用粗粒度预筛选 + 多进程并行筛选加速（优化版）。
     """
     all_traces = []
     total_steps = SIM_DURATION_SEC // TIME_STEP_SEC
 
-    # 预加载所有Starlink卫星（避免重复加载TLE）
+    # 构建轨道数据缓存（一次性，后续筛选复用）
+    print(f"🔧 构建轨道数据缓存（{len(all_starlink_sats)} 颗卫星）...")
+    orbit_data = _build_orbit_data(all_starlink_sats)
     print(f"📡 预加载 {len(all_starlink_sats)} 颗Starlink卫星，开始动态轨迹计算...")
 
     for step in range(total_steps):
@@ -162,9 +490,13 @@ def calculate_dynamic_sat_trajectory(all_starlink_sats, ts, t0, observer):
         current_time_ms = current_sec * MS_PER_SEC
         current_t = t0 + timedelta(seconds=current_sec)
 
-        # 每N秒重新筛选一次可见卫星
+        # 每N秒重新筛选一次可见卫星（使用优化版筛选）
         if current_sec % DYNAMIC_FILTER_INTERVAL_SEC == 0:
-            current_sat_metadata = filter_visible_satellites(all_starlink_sats, observer, current_t)
+            elapsed_minutes = current_sec / 60.0
+            current_sat_metadata = filter_visible_satellites_optimized(
+                all_starlink_sats, observer, current_t,
+                orbit_data, elapsed_minutes,
+            )
             print(f"⏱️  时间 {current_sec}秒：筛选出 {len(current_sat_metadata)} 颗可见卫星")
 
         # 计算当前可见卫星的轨迹
@@ -294,6 +626,9 @@ if __name__ == "__main__":
         satellites = load.tle_file(TLE_FILE)
         all_starlink_sats = [sat for sat in satellites if "STARLINK" in sat.name.upper()]
         print(f"📡 预加载 {len(all_starlink_sats)} 颗Starlink卫星")
+
+        # 性能优化：构建 TLE 行缓存（用于多进程传递卫星信息）
+        _build_tle_line_cache(TLE_FILE)
 
         trajectory_df = calculate_dynamic_sat_trajectory(all_starlink_sats, ts, t0, observer)
         validate_trajectory_data(trajectory_df)
